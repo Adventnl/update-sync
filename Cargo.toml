@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/relay-core", "crates/relay-cli", "src-tauri"]
+default-members = ["crates/relay-core", "crates/relay-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.85"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

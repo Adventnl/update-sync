@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Relay's local main window. No arbitrary filesystem or shell access is exposed to the webview.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}
