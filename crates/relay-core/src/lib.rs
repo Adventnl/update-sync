@@ -5,6 +5,7 @@ pub mod github;
 pub mod manager;
 pub mod model;
 pub mod platform;
+pub mod recipes;
 pub mod storage;
 pub mod store;
 #[cfg(windows)]

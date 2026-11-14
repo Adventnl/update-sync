@@ -18,17 +18,17 @@ One person managing their own GitHub applications across personal Windows and ma
 
 ## Product purpose
 
-Paste a GitHub URL, install a verified application package, open it, update it safely, and remove resources with known ownership. Keep build and version clutter under control.
+Paste a GitHub URL, compile and install its latest main commit, open it, update it safely, and remove resources with known ownership. Keep build and version clutter under control.
 
 ## Operating context
 
-Prefer GitHub Releases and artifacts from successful workflows on main. Detect common project stacks without requiring existing projects to be rewritten. Local builds require explicit trust and run in disposable workspaces. They are not an operating-system security sandbox.
+Detect build systems deterministically from pinned main source snapshots. Install and Update compile in disposable managed workspaces with private dependency caches. Ask for reusable configuration only when detection is insufficient. Build execution uses the user account and is not an operating-system security sandbox.
 
 ## Capabilities and constraints
 
-Stable repository identities, stable launch shortcuts, recoverable version selection, private repository access, release channels, history, repair, stop tracking, and scoped cache cleanup. Never infer ownership of unrelated files or silently terminate running apps. Do not bypass platform signing checks. No administrator privileges by default.
+Stable repository identities, stable launch shortcuts, recoverable version selection, private repository access, source commit tracking, history, repair, stop tracking, and scoped cache cleanup. Never infer ownership of unrelated files or silently terminate running apps. Do not bypass platform signing checks. No administrator privileges by default.
 
-Arbitrary repositories cannot always be packaged automatically. Missing or ambiguous packages need a clear explanation and an explicit selection. Applications requiring system installers, privileged services, or drivers need their native installer and cannot receive the same transaction guarantee as portable packages.
+Arbitrary repositories cannot always be packaged automatically. Missing or ambiguous build layouts need a clear explanation and a saved project configuration. Applications requiring system installers, privileged services, or drivers need their native installer and cannot receive the same transaction guarantee as portable packages.
 
 ## Brand commitments
 
@@ -39,7 +39,7 @@ Apple-inspired restraint, native typography, considered spacing, minimal surface
 - Keep the previous working version until the replacement is installed.
 - Delete only resources whose ownership is established.
 - Show real progress and actionable failures.
-- Prefer successful remote builds over local toolchains.
+- Compile source automatically and remove build caches after each operation.
 
 ## Confirmed defaults
 

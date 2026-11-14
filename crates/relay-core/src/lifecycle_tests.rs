@@ -51,6 +51,7 @@ pub(crate) fn app() -> App {
         check_error: None,
         desktop_shortcut: false,
         data_folders: vec![],
+        build_config: None,
     }
 }
 fn setup() -> (tempfile::TempDir, Manager, Arc<TestIntegration>) {
@@ -178,10 +179,128 @@ fn cleanup_protects_current_and_one_rollback_version() {
         m.commit(&p.ticket, "Example.jar").unwrap();
     }
     let list = m.storage().unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].name, "Example v1");
-    m.cleanup(&[list[0].id.clone()]).unwrap();
+    assert!(list.is_empty());
+    let app = m.store().unwrap().app("gh-1").unwrap();
+    assert_eq!(app.active().unwrap().label, "v3");
+    assert_eq!(app.versions[1].label, "v2");
+    assert_eq!(
+        fs::read_dir(m.store().unwrap().app_dir("gh-1").unwrap().join("versions"))
+            .unwrap()
+            .count(),
+        2
+    );
     assert_eq!(m.store().unwrap().app("gh-1").unwrap().versions.len(), 2);
+}
+#[test]
+fn source_commits_drive_updates_without_release_assets() {
+    let repo = app().repository;
+    let first = crate::github::source_package(&repo, &"a".repeat(40)).unwrap();
+    let second = crate::github::source_package(&repo, &"b".repeat(40)).unwrap();
+    let mut installed = InstalledVersion {
+        id: "fixture".into(),
+        label: first.version.clone(),
+        commit: first.commit.clone(),
+        installed_at: now(),
+        entry: "Example.exe".into(),
+        package_digest: "hash".into(),
+        source: first.id,
+        files: vec![],
+        size: 1,
+    };
+    assert!(
+        crate::manager::select_update(std::slice::from_ref(&second), Some(&installed)).is_some()
+    );
+    installed.commit = second.commit.clone();
+    assert!(crate::manager::select_update(&[second], Some(&installed)).is_none());
+    assert!(crate::github::source_package(&repo, "main").is_err());
+}
+
+#[test]
+fn recovery_deletes_only_owned_build_caches_and_keeps_prepared_content() {
+    let (_temp, m, _) = setup();
+    let prepared = prepare(&m, "v1");
+    let builds = m.root.join("builds");
+    fs::create_dir_all(builds.join("build-crashed/cache")).unwrap();
+    fs::write(builds.join("build-crashed/.relay-owned"), "build").unwrap();
+    fs::write(builds.join("build-crashed/cache/dependency"), "cache").unwrap();
+    fs::create_dir(builds.join("unowned")).unwrap();
+    m.recover().unwrap();
+    assert!(!builds.join("build-crashed").exists());
+    assert!(builds.join("unowned").is_dir());
+    assert!(m
+        .root
+        .join("staging")
+        .join(prepared.ticket)
+        .join("content")
+        .exists());
+}
+
+#[test]
+fn actual_cargo_source_compiles_and_failed_rebuild_keeps_data_and_active_version() {
+    use crate::recipes::{BuildConfig, BuildSystem};
+    let (_temp, m, _) = setup();
+    let work = tempfile::tempdir_in(m.root.join("builds")).unwrap();
+    let project = work.path().join("source");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname='source-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("src/main.rs"),
+        "fn main() { println!(\"built from source\"); }",
+    )
+    .unwrap();
+    let environment = work.path().join("environment");
+    fs::create_dir(&environment).unwrap();
+    let output = work.path().join("package");
+    fs::create_dir(&output).unwrap();
+    // Common build scripts concatenate OUT_DIR with '/', including on Windows.
+    fs::write(project.join("build.rs"), r#"fn main() { std::fs::write(format!("{}/generated.rs", std::env::var("OUT_DIR").unwrap()), "").unwrap(); }"#).unwrap();
+    let config = BuildConfig::new(BuildSystem::Cargo, ".".into());
+    m.compile_project("gh-1", &project, &environment, &output, "gh-1", &config)
+        .unwrap();
+    let entries = crate::archive::entries(&output).unwrap();
+    assert_eq!(entries.len(), 1);
+    let mut package = crate::github::source_package(&app().repository, &"a".repeat(40)).unwrap();
+    package.source = "local".into();
+    let prepared = m
+        .persist_prepared(
+            &app(),
+            package,
+            "source-digest".into(),
+            &output,
+            entries.clone(),
+        )
+        .unwrap();
+    let installed = m.commit(&prepared.ticket, &entries[0]).unwrap();
+    assert_eq!(
+        installed.active().unwrap().commit.as_deref(),
+        Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    let data = m.store().unwrap().app_dir("gh-1").unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join("settings.json"), "keep").unwrap();
+    fs::write(project.join("src/main.rs"), "this does not compile").unwrap();
+    fs::create_dir(&output).unwrap();
+    assert!(m
+        .compile_project("gh-1", &project, &environment, &output, "gh-1", &config)
+        .is_err());
+    assert_eq!(
+        m.store().unwrap().app("gh-1").unwrap().active_version,
+        installed.active_version
+    );
+    assert_eq!(
+        fs::read_to_string(data.join("settings.json")).unwrap(),
+        "keep"
+    );
+    assert!(m.verify("gh-1").unwrap().is_empty());
+    work.close().unwrap();
+    assert!(fs::read_dir(m.root.join("builds"))
+        .unwrap()
+        .next()
+        .is_none());
 }
 #[test]
 fn interrupted_promotion_is_recovered_without_changing_active_version() {

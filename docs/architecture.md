@@ -21,13 +21,13 @@ Each installed version has a store-written ownership marker and a receipt contai
 
 ## Installation transaction
 
-1. Re-fetch repository identity and package metadata from GitHub. The UI supplies a package ID, never an arbitrary download URL.
-2. Download into a disposable folder with a 4 GB limit and verify GitHub's SHA-256 digest when available. Missing digests require explicit approval.
-3. Extract under an 8 GB and 100,000-file limit. Reject traversal, devices, hard links, reserved names, duplicate files, and unsafe links. On macOS, internal relative symlinks are resolved and checked.
-4. Persist a prepared-install plan. A package with several executable candidates requires selection. Completed downloads can be resumed from Storage.
-5. Check signatures, inventory files, flush file contents, and persist a promotion journal before moving the prepared content into a new version folder.
-6. Register launch integration and commit the new active-version pointer in SQLite. Keep previous versions for rollback.
-7. Remove staging data. A failed integration or metadata commit restores the old integration and returns the new content to staging. Startup recovers interrupted promotions by consulting the journal and active pointer.
+1. Resolve the repository's numeric identity and full `main` commit SHA. Release and Actions endpoints are not part of source installation or source update checks.
+2. Download the source archive pinned to that commit, subject to the existing 4 GB download and 8 GB extraction limits. Record its SHA-256 digest.
+3. Detect a reusable build recipe from the extracted manifests, or use a saved configuration or `relay.build.json`. Run it in a disposable managed workspace with private dependency caches. Only finished application files enter staging.
+4. Persist a prepared-install plan. Reuse a saved launch entry or select the sole candidate. Several unmatched candidates require a choice once. Completed builds can be resumed from Storage.
+5. Check platform integrity, inventory files, flush file contents, and persist a promotion journal before moving the prepared content into a new version folder.
+6. Register launch integration and commit the new active-version pointer in SQLite. Keep the previous version for rollback.
+7. Remove staging data and obsolete versions. A failed integration or metadata commit restores the old integration and returns the new content to staging. Startup recovers interrupted promotions by consulting the journal and active pointer.
 
 Filesystem and OS registration cannot participate in one SQLite transaction. Recovery is compensating, with a durable journal. A broken external registrar or storage device can still require repair. Relay checks for running executables before changing or removing app versions and does not terminate them.
 
@@ -39,10 +39,12 @@ macOS installs verified `.app` bundles into managed version directories and expo
 
 ## Builds
 
-Stable packages come from non-draft, non-prerelease GitHub Releases. Main-channel artifacts come from successful push, scheduled, or manually dispatched workflows on main, or the default branch when main is absent. Fork pull-request runs are excluded. Expired artifacts are ignored. GitHub Actions dispatch is available for existing workflows with default inputs.
+`recipes.rs` detects Cargo, npm/pnpm/Yarn Tauri and Electron projects, CMake, Maven, Gradle, Python, Go, and .NET. Detection runs against the pinned source, not stale stored language labels. Missing or ambiguous manifests return a configuration request. Saved configuration contains only a recipe enum, paths, and a target. It cannot inject custom shell commands. The CLI exposes the same source operations through `install` and `update`. Legacy release APIs remain for compatibility.
 
-Local fallback downloads a pinned source snapshot, presents a deterministic stack-specific plan, and requires explicit trust. Commands use argument vectors rather than repository-provided shell strings. They run with a reduced environment and disposable dependency caches. Builds have a 30-minute and 32 MB log limit. Cancellation stops the process tree on Windows and the process group on Unix. The workspace is not an OS security sandbox. Trusted code still has the user's account permissions and network access.
+Commands run with a reduced environment and disposable dependency caches. Windows compiler and SDK paths are discovered through `cc::windows_registry`. Builds have a 30-minute limit per command and a 32 MB log limit. The runner checks workspace size every two seconds and stops above 12 GB. This is a monitored budget, not a disk quota, so short-lived writes can exceed it. Cargo incremental builds are disabled; native parallel builds use at most four workers. The Windows runner assigns each command to a kill-on-close Job Object. Cancellation also stops the process tree on Windows and the process group on Unix. The workspace is not an OS security sandbox. Repository code has the user's account permissions and network access.
+
+The build workspace is removed on success, failure, or cancellation. Owned crash leftovers are removed at startup or before the next build under the operation lock. Prepared output and promotion journals are preserved for retry. No global package or toolchain cache is swept.
 
 ## Cleanup
 
-Managed cleanup protects the active version and one recent alternate. It rechecks ownership and current metadata under the mutation lock. Interrupted downloads and local-build workspaces have explicit store markers. Development scans require a chosen root, ignore links and source-control/dependency folders, and recognize Rust target folders and CMake caches. Every cache file must be more than a day old. Running build tools and processes in the project block removal. Shared toolchain caches are never swept.
+Activation automatically prunes obsolete versions while keeping the active version and one recent alternate. Managed cleanup protects those versions. It rechecks ownership and current metadata under the mutation lock. Interrupted downloads and local-build workspaces have explicit store markers. Development scans require a chosen root, ignore links and source-control/dependency folders, and recognize Rust target folders and CMake caches. Every cache file must be more than a day old. Running build tools and processes in the project block removal. Shared toolchain caches are never swept.

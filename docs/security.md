@@ -2,7 +2,7 @@
 
 Relay installs code from repositories you choose. A matching checksum proves that a download matches GitHub's metadata. It does not prove that the author or application is safe. Checksum acceptance, platform signature status, and build trust are separate decisions.
 
-GitHub CLI credentials are read from `gh auth token --hostname github.com` when enabled. Optional tokens are stored in Windows Credential Manager or the macOS Keychain through the keyring library. Tokens are never persisted in SQLite, sent to the webview, embedded in repository URLs, or inherited by build commands. Repository code still runs with your account permissions and can read other files available to that account. Local builds therefore require explicit trust.
+GitHub CLI credentials are read from `gh auth token --hostname github.com` when enabled. Optional tokens are stored in Windows Credential Manager or the macOS Keychain through the keyring library. Tokens are never persisted in SQLite, sent to the webview, embedded in repository URLs, or inherited by build commands. Repository code still runs with your account permissions and can read other files available to that account. Clicking Install or Update authorizes the selected repository build. The install form explains this execution model. There is no separate build approval or manual packaging step.
 
 Repository URLs must be plain HTTPS github.com owner/repository URLs. Download requests start at GitHub API or GitHub URLs. Redirects must remain HTTPS and have a hop limit. The HTTP client strips sensitive authentication on cross-origin redirects. No remote scripts or web content are loaded in the application webview.
 

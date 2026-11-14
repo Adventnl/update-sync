@@ -17,6 +17,18 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     List,
+    /// Compile main and install it. Configuration is saved for future updates.
+    Install {
+        url: String,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Compile the latest main commit for an existing app.
+    Update {
+        id: String,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     Settings {
         #[arg(long)]
         appearance: Option<String>,
@@ -144,6 +156,11 @@ fn main() -> anyhow::Result<()> {
     m.recover()?;
     let value = match args.command {
         Command::List => serde_json::to_value(m.snapshot()?)?,
+        Command::Install { url, config } => {
+            let app = m.add(&url, Channel::Main)?;
+            install_source(&m, &app.id, config)?
+        }
+        Command::Update { id, config } => install_source(&m, &id, config)?,
         Command::Settings {
             appearance,
             check_on_open,
@@ -250,4 +267,25 @@ fn main() -> anyhow::Result<()> {
     };
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
+}
+
+fn install_source(
+    m: &Manager,
+    id: &str,
+    path: Option<PathBuf>,
+) -> anyhow::Result<serde_json::Value> {
+    let config = path
+        .map(|path| -> anyhow::Result<recipes::BuildConfig> {
+            Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+        })
+        .transpose()?;
+    let prepared = m.build_source(id, config)?;
+    if prepared.entries.len() == 1 {
+        Ok(serde_json::to_value(
+            m.commit(&prepared.ticket, &prepared.entries[0])?,
+        )?)
+    } else {
+        // The caller can select an entry with the existing commit command once.
+        Ok(serde_json::to_value(prepared)?)
+    }
 }

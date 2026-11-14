@@ -163,7 +163,20 @@ impl Github {
             warnings: vec![],
             html_url: info.html_url,
         };
-        match self.get::<Vec<Content>>(&format!("{base}/contents")) {
+        let branch = "main";
+        let mut commit_url = url::Url::parse(&format!("{API}{base}/commits"))?;
+        commit_url
+            .query_pairs_mut()
+            .append_pair("sha", branch)
+            .append_pair("per_page", "1");
+        let commits: Vec<Commit> = self
+            .get(commit_url.as_str().strip_prefix(API).unwrap_or_default())
+            .context("Could not resolve main. Source installations require a main branch.")?;
+        result.head_commit = commits.first().map(|c| c.sha.clone());
+        match self.get::<Vec<Content>>(&format!(
+            "{base}/contents?ref={}",
+            result.head_commit.as_deref().unwrap_or("main")
+        )) {
             Ok(entries) => {
                 let names: Vec<_> = entries.iter().map(|v| v.name.as_str()).collect();
                 for (files, stack) in [
@@ -185,7 +198,10 @@ impl Github {
                 }
                 if names.contains(&"package.json") {
                     if let Ok(response) = self
-                        .request(&format!("{API}{base}/contents/package.json"))
+                        .request(&format!(
+                            "{API}{base}/contents/package.json?ref={}",
+                            result.head_commit.as_deref().unwrap_or("main")
+                        ))
                         .header(header::ACCEPT, "application/vnd.github.raw+json")
                         .send()
                         .and_then(|r| r.error_for_status())
@@ -204,30 +220,6 @@ impl Github {
                 }
             }
             Err(e) => result.warnings.push(e.to_string()),
-        }
-        let mut branch = "main".to_owned();
-        // Resolve a branch through a query rather than interpolating its possibly slashed name.
-        let mut commit_url = url::Url::parse(&format!("{API}{base}/commits"))?;
-        commit_url
-            .query_pairs_mut()
-            .append_pair("sha", &branch)
-            .append_pair("per_page", "1");
-        if let Ok(commits) =
-            self.get::<Vec<Commit>>(commit_url.as_str().strip_prefix(API).unwrap_or_default())
-        {
-            result.head_commit = commits.first().map(|c| c.sha.clone());
-        } else if result.default_branch != "main" {
-            branch = result.default_branch.clone();
-            commit_url.set_query(None);
-            commit_url
-                .query_pairs_mut()
-                .append_pair("sha", &branch)
-                .append_pair("per_page", "1");
-            if let Ok(commits) =
-                self.get::<Vec<Commit>>(commit_url.as_str().strip_prefix(API).unwrap_or_default())
-            {
-                result.head_commit = commits.first().map(|c| c.sha.clone());
-            }
         }
         match channel {
             Channel::Stable => {
@@ -252,61 +244,17 @@ impl Github {
                 }
             }
             Channel::Main => {
-                if branch != "main" {
-                    result.warnings.push(format!("This repository uses {branch} as its default branch. Successful builds from {branch} are shown."));
-                }
-                let mut query = url::Url::parse(&format!("{API}{base}/actions/runs"))?;
-                query
-                    .query_pairs_mut()
-                    .append_pair("branch", &branch)
-                    .append_pair("status", "success")
-                    .append_pair("per_page", "20");
-                match self.get::<Runs>(query.as_str().strip_prefix(API).unwrap_or_default()) {
-                    Ok(runs) => {
-                        for run in runs
-                            .workflow_runs
-                            .into_iter()
-                            .filter(|r| {
-                                matches!(
-                                    r.event.as_str(),
-                                    "push" | "workflow_dispatch" | "schedule"
-                                ) && r.head_repository.as_ref().map(|r| r.id) == Some(info.id)
-                            })
-                            .take(10)
-                        {
-                            match self.get::<Artifacts>(&format!(
-                                "{base}/actions/runs/{}/artifacts?per_page=100",
-                                run.id
-                            )) {
-                                Ok(artifacts) => {
-                                    for artifact in
-                                        artifacts.artifacts.into_iter().filter(|a| !a.expired)
-                                    {
-                                        result.packages.push(Package {
-                                            id: format!("artifact-{}", artifact.id),
-                                            compatible: compatible(&artifact.name),
-                                            name: format!("{}.zip", artifact.name),
-                                            url: artifact.archive_download_url,
-                                            version: format!(
-                                                "main-{}",
-                                                &run.head_sha[..7.min(run.head_sha.len())]
-                                            ),
-                                            commit: Some(run.head_sha.clone()),
-                                            digest: artifact.digest,
-                                            size: artifact.size_in_bytes,
-                                            source: "actions".into(),
-                                            published_at: run.created_at.clone(),
-                                        });
-                                    }
-                                }
-                                Err(e) => result.warnings.push(e.to_string()),
-                            }
-                        }
-                    }
-                    Err(e) => result.warnings.push(e.to_string()),
-                }
+                let commit = result
+                    .head_commit
+                    .clone()
+                    .context("The main branch is empty.")?;
+                result
+                    .packages
+                    .push(source_package(&result.repository, &commit)?);
+                return Ok(result);
             }
         }
+
         if result.packages.is_empty() {
             result.warnings.push("No downloadable packages found. Publish a portable ZIP or a macOS app ZIP, use the other channel, or review a local build.".into());
         }
@@ -324,7 +272,14 @@ impl Github {
         validate_download_url(&package.url)?;
         let mut response = self
             .request(&package.url)
-            .header(header::ACCEPT, "application/octet-stream")
+            .header(
+                header::ACCEPT,
+                if package.source == "source" || package.id.starts_with("source-") {
+                    "application/vnd.github+json"
+                } else {
+                    "application/octet-stream"
+                },
+            )
             .timeout(Duration::from_secs(1800))
             .send()?
             .error_for_status()
@@ -357,6 +312,29 @@ impl Github {
         }
         Ok(digest)
     }
+}
+
+/// A source candidate is identified by the full commit, independent of releases and CI.
+pub fn source_package(repo: &Repository, commit: &str) -> Result<Package> {
+    anyhow::ensure!(
+        commit.len() == 40 && commit.bytes().all(|b| b.is_ascii_hexdigit()),
+        "GitHub returned an invalid main commit."
+    );
+    Ok(Package {
+        id: format!("source-{commit}"),
+        name: "source.zip".into(),
+        url: format!(
+            "https://api.github.com/repos/{}/zipball/{commit}",
+            repo.slug()
+        ),
+        version: format!("main-{}", &commit[..7]),
+        commit: Some(commit.into()),
+        digest: None,
+        size: 0,
+        source: "source".into(),
+        published_at: String::new(),
+        compatible: true,
+    })
 }
 
 pub fn validate_download_url(value: &str) -> Result<()> {
@@ -438,36 +416,6 @@ struct Asset {
     digest: Option<String>,
     size: u64,
 }
-#[derive(Deserialize)]
-struct Runs {
-    workflow_runs: Vec<Run>,
-}
-#[derive(Deserialize)]
-struct Run {
-    id: u64,
-    head_sha: String,
-    event: String,
-    created_at: String,
-    head_repository: Option<RepoId>,
-}
-#[derive(Deserialize)]
-struct RepoId {
-    id: u64,
-}
-#[derive(Deserialize)]
-struct Artifacts {
-    artifacts: Vec<Artifact>,
-}
-#[derive(Deserialize)]
-struct Artifact {
-    id: u64,
-    name: String,
-    archive_download_url: String,
-    expired: bool,
-    size_in_bytes: u64,
-    digest: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -37,7 +37,7 @@ Overall: The Windows application builds and its implemented lifecycle has automa
 
 ### P2 — Medium
 
-- Local builds support documented stack conventions. Custom layouts, submodules, privileged resources, unusual dependency packaging, and project-specific migrations need their own packaging recipes. Remote compiled packages remain the preferred path.
+- Local builds support documented stack conventions. Custom layouts, submodules, privileged resources, unusual dependency packaging, and project-specific migrations need their own packaging recipes. Install and Update now use deterministic source recipes. Ambiguous layouts require a saved configuration.
 - The detector reported two motion advisories for the restrained spring curve. The brief explicitly asks for physically natural motion. Reduced-motion overrides are present.
 
 ### P3 — Nits
@@ -54,9 +54,9 @@ Overall: The Windows application builds and its implemented lifecycle has automa
 ## Verification
 
 - Rust workspace tests cover repository validation, extraction, database reopening, ownership, interrupted promotion, rollback, tracking, version cleanup, release variants, cross-process locks, and native Windows shortcut semantics.
-- Frontend tests cover the actual empty state, adding a repository, checksum approval, recoverable errors, storage navigation, system appearance, and semantic menu activation.
-- `npm run check` passes TypeScript, ESLint, seven frontend tests, and the production web build.
-- `cargo test --workspace --locked` and `cargo clippy --workspace --all-targets --locked -- -D warnings` pass on Windows. The core has 20 tests, including two native shortcut tests.
+- Frontend tests cover the actual empty state, source install and one-click updates, configuration recovery, activation retries, recoverable errors, storage navigation, system appearance, and semantic menu activation.
+- `npm run check` passes TypeScript, ESLint, 12 frontend tests, and the production web build.
+- `cargo test --workspace --locked` and `cargo clippy --workspace --all-targets --locked -- -D warnings` pass on Windows. The core has 28 tests, including two native shortcut tests.
 - `npm audit` reports zero known dependency vulnerabilities. The minimatch override removes the reported development-tool advisory; lint and tests verify its compatibility.
 - `npm run desktop:build -- --bundles nsis` produces the Windows executable and a roughly 4 MB per-user installer.
 - A real ripgrep release was downloaded into an isolated test library. Its 13 files verified, its installed executable ran, Windows registration and a Start menu shortcut were created, tracking changes preserved the files, and uninstall removed its registration and shortcut.
@@ -64,3 +64,13 @@ Overall: The Windows application builds and its implemented lifecycle has automa
 - Native desktop captures cover light and dark modes, real installed content, app details, repository review, and the minimum supported window. macOS is not claimed as verified.
 
 Inspected the entire project. Fixed critical filesystem and transaction boundaries, high-priority identity and accessibility defects, and native integration failures. Deferred signing, macOS execution, and unsupported installer adapters for the reasons above. Changed the Rust engine and adapters, React interface, platform packaging, tests, and repository documentation. Added lifecycle, parsing, extraction, native shortcut, and UI flow coverage. Windows gates pass within the stated scope. No unrelated features added.
+
+## Source build verification
+
+The source-first update was verified on Windows with 28 Rust tests and 12 frontend tests. A real Cargo fixture compiles, enters the existing installation transaction, and survives a failed rebuild with its active version and data intact. Coverage includes pinned source update selection, remembered launch entries, resource collection, executable JAR filtering, and owned crash-cache cleanup.
+
+A live build of `microsoft/edit` at commit `b7f83220868373945945e2218e852c24cbb4dcf0` downloaded source from GitHub, detected Cargo, and produced `edit.exe`. Running it with `--version` reported `edit version 2.0.0`. The managed builds directory was empty afterward. This was a prepared build in a temporary library; it did not add Microsoft Edit to the user's normal library or shortcuts. Receipt-checked discard removed the prepared output. Recursive removal of the temporary library's remaining metadata was blocked by the tool approval policy.
+
+The live run exposed and verified fixes for the source archive Accept header, Windows compiler discovery outside a developer terminal, and Windows verbatim paths passed to build scripts. The current source workflow does not need release assets or successful CI artifacts. SDKs and compilers remain prerequisites. macOS and the other build recipes have not received live compilation verification in this Windows session.
+
+Agent Desktop refused the current UI observation with a private-file DACL error. The source-flow UI has component verification and a production build, but no new rendered desktop verification is claimed.

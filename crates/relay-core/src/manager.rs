@@ -153,6 +153,7 @@ impl Manager {
             check_error: None,
             desktop_shortcut: false,
             data_folders: vec![],
+            build_config: None,
         };
         store.save(&app, "Added", "Added to your library.")?;
         Ok(app)
@@ -166,7 +167,7 @@ impl Manager {
         for original in store.apps()?.into_iter().filter(|a| a.tracked) {
             self.check_cancelled()?;
             self.report(&original.id, "checking", "Checking GitHub");
-            let inspected = github.inspect(&original.repository, &original.channel);
+            let inspected = github.inspect(&original.repository, &Channel::Main);
             self.check_cancelled()?;
             let _guard = self.lock()?;
             let mut app = store.app(&original.id)?;
@@ -181,6 +182,8 @@ impl Manager {
                     );
                     app.available = select_update(&info.packages, app.active());
                     app.repository = info.repository;
+                    app.channel = Channel::Main;
+                    app.stacks = info.stacks;
                     app.check_error = None;
                 }
                 Err(e) => {
@@ -382,8 +385,21 @@ impl Manager {
                 "Could not commit the installation. Your previous version is still active.",
             ));
         }
-        fs::remove_dir_all(&staged)
-            .context("Installed successfully, but the staging folder needs storage cleanup.")?;
+        if let Err(error) = fs::remove_dir_all(&staged) {
+            self.report(
+                &app.id,
+                "cleanup",
+                &format!("Installed. Staging cleanup will retry on the next launch: {error}"),
+            );
+        }
+        // Activation is already durable. Cleanup failure must not report a failed update.
+        if let Err(error) = self.prune_versions(&mut store, &mut app) {
+            self.report(
+                &app.id,
+                "cleanup",
+                &format!("Installed. Old version cleanup can be retried in Storage: {error}"),
+            );
+        }
         self.report(&app.id, "done", "Ready to open");
         Ok(app)
     }
@@ -436,7 +452,14 @@ impl Manager {
     }
     pub fn recover(&self) -> Result<()> {
         let _guard = self.lock()?;
-        let store = self.store()?;
+        let mut store = self.store()?;
+        if let Err(error) = self.clean_interrupted_builds() {
+            self.report(
+                "",
+                "cleanup",
+                &format!("Interrupted build cleanup needs attention in Storage: {error}"),
+            );
+        }
         for entry in fs::read_dir(self.root.join("staging"))? {
             let entry = entry?;
             let ticket = entry.file_name().to_string_lossy().into_owned();
@@ -469,6 +492,17 @@ impl Manager {
                     fs::rename(promoted, staged.join("content"))?;
                 }
                 fs::remove_file(staged.join("promotion.json"))?;
+            }
+        }
+        for mut app in store.apps()? {
+            if !platform::running(&store.app_dir(&app.id)?) {
+                if let Err(error) = self.prune_versions(&mut store, &mut app) {
+                    self.report(
+                        &app.id,
+                        "cleanup",
+                        &format!("Old version cleanup needs attention in Storage: {error}"),
+                    );
+                }
             }
         }
         Ok(())
@@ -696,7 +730,11 @@ pub(crate) fn select_update(
         .collect();
     // A release can publish GNU/MSVC or several app variants. Installing one must
     // not make another asset from that same release appear as a new version.
-    if installed.is_some_and(|v| group.iter().any(|p| p.id == v.source)) {
+    if installed.is_some_and(|v| {
+        group.iter().any(|p| {
+            p.id == v.source || (p.source == "source" && p.commit.is_some() && p.commit == v.commit)
+        })
+    }) {
         return None;
     }
     group

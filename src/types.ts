@@ -18,6 +18,7 @@ export interface AppRecord {
   versions: InstalledVersion[]; available: Package | null; checkedAt: string | null;
   checkError: string | null; desktopShortcut: boolean;
   dataFolders: string[];
+  buildConfig?: BuildConfig | null;
 }
 export interface Activity { id: string; appId: string; appName: string; action: string; detail: string; at: string }
 export interface Settings { appearance: 'system' | 'light' | 'dark'; useGithubCli: boolean; checkOnOpen: boolean }
@@ -29,6 +30,10 @@ export interface Progress { appId: string; stage: string; message: string; compl
 export interface Prepared { ticket: string; appId: string; package: Package; digest: string; entries: string[]; previous: string | null }
 export interface StorageItem { id: string; name: string; path: string; size: number; kind: string; appId: string | null; detail: string }
 export interface BuildPlan { stack: string; steps: string[]; warning: string }
+export interface BuildConfig {
+  system: 'tauri' | 'electron' | 'cargo' | 'cmake' | 'maven' | 'gradle' | 'python' | 'go' | 'dotnet';
+  project: string; target: string | null; output: string | null; entry: string | null; resources: string[];
+}
 export interface Workflow { id: number; name: string; path: string; state: string }
 export type View = 'library' | 'updates' | 'storage' | 'activity' | 'settings' | 'untracked';
 export type Action =

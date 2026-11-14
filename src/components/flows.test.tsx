@@ -5,7 +5,7 @@ import App from '../App';
 import type { AppRecord, Channel, Inspection, Snapshot, StorageItem } from '../types';
 import { desktop } from '../services/desktop';
 
-vi.mock('../services/desktop', () => ({ desktop: { snapshot: vi.fn(), listen: vi.fn().mockResolvedValue(() => {}), inspect: vi.fn(), add: vi.fn(), prepare: vi.fn(), commit: vi.fn(), perform: vi.fn(), storage: vi.fn(), prepared: vi.fn(), settings: vi.fn(), token: vi.fn(), folder: vi.fn(), cancel: vi.fn(), buildPlan: vi.fn(), build: vi.fn(), workflows: vi.fn(), scan: vi.fn(), removeCache: vi.fn(), cleanup: vi.fn() } }));
+vi.mock('../services/desktop', () => ({ desktop: { snapshot: vi.fn(), listen: vi.fn().mockResolvedValue(() => {}), inspect: vi.fn(), add: vi.fn(), prepare: vi.fn(), commit: vi.fn(), perform: vi.fn(), storage: vi.fn(), prepared: vi.fn(), settings: vi.fn(), token: vi.fn(), folder: vi.fn(), cancel: vi.fn(), buildSource: vi.fn(), buildPlan: vi.fn(), build: vi.fn(), workflows: vi.fn(), scan: vi.fn(), removeCache: vi.fn(), cleanup: vi.fn() } }));
 const snapshot: Snapshot = { apps: [], activity: [], root: 'test-library', platform: 'windows', architecture: 'x86_64', auth: 'Public access', settings: { appearance: 'system', useGithubCli: true, checkOnOpen: false } };
 const inspection: Inspection = { repository: { owner: 'test', name: 'Example' }, repositoryId: 1, description: 'Test fixture application', defaultBranch: 'main', headCommit: 'a'.repeat(40), stacks: ['Rust'], packages: [{ id: 'release-1', name: 'Example-windows.zip', version: 'v1', url: 'https://api.github.com/repos/test/Example/releases/assets/1', commit: null, digest: null, size: 1024, source: 'release', publishedAt: '', compatible: true }], warnings: [], htmlUrl: 'https://github.com/test/Example' };
 beforeEach(() => {
@@ -25,24 +25,29 @@ describe('library workflow', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'GitHub repository' })).toHaveFocus();
   });
-  it('requires explicit approval when the package has no checksum', async () => {
-    const user = userEvent.setup(); vi.mocked(desktop.inspect).mockResolvedValue(inspection); render(<App />);
+  it('compiles and installs from a pasted URL without package selection', async () => {
+    const user = userEvent.setup();
+    const app = record('Example', 1, 'main');
+    vi.mocked(desktop.add).mockResolvedValue(app);
+    vi.mocked(desktop.buildSource).mockResolvedValue({ ticket: 'ticket', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
+    vi.mocked(desktop.commit).mockResolvedValue(app);
+    render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
-    await user.click(screen.getByRole('button', { name: 'Find app' }));
-    const install = await screen.findByRole('button', { name: 'Install app' });
-    expect(install).toBeDisabled();
-    await user.click(screen.getByRole('checkbox', { name: /without a publisher checksum/ }));
-    expect(install).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(desktop.commit).toHaveBeenCalledWith('ticket', 'Example.exe'));
+    expect(desktop.add).toHaveBeenCalledWith('https://github.com/test/Example', 'main');
+    expect(desktop.buildSource).toHaveBeenCalledWith('gh-1', null);
     expect(desktop.prepare).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
-  it('keeps failed inspection recoverable and shows the reason', async () => {
-    const user = userEvent.setup(); vi.mocked(desktop.inspect).mockRejectedValue(new Error('Repository not found.')); render(<App />);
+  it('keeps a failed source build recoverable and shows the reason', async () => {
+    const user = userEvent.setup(); vi.mocked(desktop.add).mockRejectedValue(new Error('Repository not found.')); render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/missing');
-    await user.click(screen.getByRole('button', { name: 'Find app' }));
+    await user.click(screen.getByRole('button', { name: 'Install' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Repository not found.');
-    expect(screen.getByRole('button', { name: 'Find app' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Retry installation' })).toBeEnabled();
   });
   it('navigates to real storage and respects system appearance', async () => {
     const user = userEvent.setup(); render(<App />);
@@ -58,28 +63,46 @@ describe('library workflow', () => {
     fireEvent.click(trigger, { detail: 1 });
     expect(await screen.findByRole('menuitem', { name: 'App details' })).toBeInTheDocument();
   });
-  it('invalidates the retained app and build trust when repository or channel changes', async () => {
-    const user = userEvent.setup();
-    const second: Inspection = { ...inspection, repositoryId: 2, repository: { owner: 'test', name: 'Second' } };
-    vi.mocked(desktop.inspect).mockResolvedValueOnce(inspection).mockResolvedValueOnce(second).mockResolvedValueOnce(second);
-    vi.mocked(desktop.add).mockImplementation(async (url, channel) => url.endsWith('/Second') ? record('Second', 2, channel) : record('Example', 1, channel));
-    vi.mocked(desktop.buildPlan).mockResolvedValue({ stack: 'Rust', steps: ['cargo build --release'], warning: 'Trust the repository.' });
+  it('starts an existing app update with one click and reuses saved configuration', async () => {
+    const user = userEvent.setup(); const app = record('Example', 1, 'stable');
+    app.activeVersion = 'v1'; app.versions = [{ id: 'v1', label: 'old', commit: null, installedAt: '', entry: 'Example.exe', packageDigest: 'hash', source: 'release', size: 1 }];
+    app.available = inspection.packages[0];
+    vi.mocked(desktop.snapshot).mockResolvedValue({ ...snapshot, apps: [app] });
+    vi.mocked(desktop.buildSource).mockResolvedValue({ ticket: 'update', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: 'v1' });
+    vi.mocked(desktop.commit).mockResolvedValue(app);
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
-    const field = screen.getByRole('textbox', { name: 'GitHub repository' });
-    await user.type(field, 'https://github.com/test/Example'); await user.click(screen.getByRole('button', { name: 'Find app' }));
-    await user.click(await screen.findByRole('button', { name: 'Review local build…' }));
-    await user.click(await screen.findByRole('checkbox', { name: /approve running its build code/ }));
-    await user.clear(field); await user.type(field, 'https://github.com/test/Second');
-    await user.click(screen.getByRole('button', { name: 'Find app' }));
-    await user.click(await screen.findByRole('button', { name: 'Review local build…' }));
-    expect(await screen.findByRole('checkbox', { name: /approve running its build code/ })).not.toBeChecked();
-    expect(desktop.buildPlan).toHaveBeenLastCalledWith('gh-2');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Channel' }), 'main');
-    await user.click(screen.getByRole('button', { name: 'Find app' }));
-    await user.click(await screen.findByRole('button', { name: 'Review local build…' }));
-    expect(desktop.add).toHaveBeenLastCalledWith('https://github.com/test/Second', 'main');
-    expect(await screen.findByRole('checkbox', { name: /approve running its build code/ })).not.toBeChecked();
+    await user.click(await screen.findByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(desktop.commit).toHaveBeenCalledWith('update', 'Example.exe'));
+    expect(desktop.buildSource).toHaveBeenCalledTimes(1);
+    expect(desktop.add).not.toHaveBeenCalled();
+  });
+  it('asks for reusable configuration only when detection is insufficient', async () => {
+    const user = userEvent.setup(); const app = record('Example', 1, 'main');
+    vi.mocked(desktop.add).mockResolvedValue(app);
+    vi.mocked(desktop.buildSource).mockRejectedValueOnce(new Error('Build configuration needed: choose a project folder.')).mockResolvedValueOnce({ ticket: 'configured', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
+    vi.mocked(desktop.commit).mockResolvedValue(app);
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    expect(screen.queryByRole('group', { name: 'Build configuration' })).not.toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
+    await user.click(screen.getByRole('button', { name: 'Install' }));
+    const project = await screen.findByRole('textbox', { name: 'Project folder' });
+    await user.clear(project); await user.type(project, 'apps/desktop');
+    await user.click(screen.getByRole('button', { name: 'Save and retry' }));
+    await waitFor(() => expect(desktop.buildSource).toHaveBeenLastCalledWith('gh-1', expect.objectContaining({ system: 'cargo', project: 'apps/desktop' })));
+    expect(desktop.add).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the prepared application available when activation fails', async () => {
+    const user = userEvent.setup(); const app = record('Example', 1, 'main');
+    vi.mocked(desktop.add).mockResolvedValue(app);
+    vi.mocked(desktop.buildSource).mockResolvedValue({ ticket: 'retry', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
+    vi.mocked(desktop.commit).mockRejectedValueOnce(new Error('Close the running app.')).mockResolvedValueOnce(app);
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
+    await user.click(screen.getByRole('button', { name: 'Install' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Close the running app.');
+    await user.click(screen.getByRole('button', { name: 'Finish installation' }));
+    await waitFor(() => expect(desktop.commit).toHaveBeenCalledTimes(2));
+    expect(desktop.buildSource).toHaveBeenCalledTimes(1);
   });
   it('keeps storage failures separate and never reports failed measurements as tidy', async () => {
     const user = userEvent.setup();

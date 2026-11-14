@@ -48,6 +48,62 @@ fn cache_stats(path: &Path) -> Result<(u64, SystemTime)> {
 }
 
 impl Manager {
+    /// Called only with the operation lock held. Delete receipts belonging to abandoned builds.
+    pub(crate) fn clean_interrupted_builds(&self) -> Result<()> {
+        for area in ["builds", "staging"] {
+            let root = safe_child(&self.root, area)?;
+            for entry in fs::read_dir(&root)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() || is_link(&fs::symlink_metadata(entry.path())?) {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let path = safe_child(&root, &name)?;
+                let expected = if area == "builds" {
+                    "build"
+                } else {
+                    "download"
+                };
+                if fs::read_to_string(path.join(".relay-owned"))
+                    .ok()
+                    .as_deref()
+                    == Some(expected)
+                {
+                    fs::remove_dir_all(path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Retain the active version and its immediate predecessor, including after a rollback.
+    pub(crate) fn prune_versions(
+        &self,
+        store: &mut crate::store::Store,
+        app: &mut crate::model::App,
+    ) -> Result<()> {
+        let alternate = app
+            .versions
+            .iter()
+            .find(|v| Some(&v.id) != app.active_version.as_ref())
+            .map(|v| v.id.clone());
+        let obsolete: Vec<_> = app
+            .versions
+            .iter()
+            .filter(|v| {
+                Some(&v.id) != app.active_version.as_ref() && Some(&v.id) != alternate.as_ref()
+            })
+            .map(|v| v.id.clone())
+            .collect();
+        for version in obsolete {
+            let path = self.assert_owned_version(store, &app.id, &version)?;
+            if path.exists() {
+                fs::remove_dir_all(path)?;
+            }
+            app.versions.retain(|v| v.id != version);
+            store.save(app, "", "")?;
+        }
+        Ok(())
+    }
     pub fn storage(&self) -> Result<Vec<StorageItem>> {
         let store = self.store()?;
         let apps = store.apps()?;

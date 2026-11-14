@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Action, AppRecord, BuildPlan, Channel, Inspection, Prepared, Progress, Settings, Snapshot, StorageItem, Workflow } from '../types';
+import type { Action, AppRecord, BuildConfig, BuildPlan, Channel, Inspection, Prepared, Progress, Settings, Snapshot, StorageItem, Workflow } from '../types';
 
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) return Promise.reject(new Error('Open Relay as a desktop app. Run npm run desktop to connect to the native application manager.'));
@@ -16,6 +16,7 @@ export const desktop = {
   commit: (ticket: string, entry: string) => call<AppRecord>('commit_install', { ticket, entry }),
   buildPlan: (id: string) => call<BuildPlan>('build_plan', { id }),
   build: (id: string) => call<Prepared>('local_build', { id, trust: true }),
+  buildSource: (id: string, configuration: BuildConfig | null = null) => call<Prepared>('build_source', { id, configuration }),
   workflows: (id: string) => call<Workflow[]>('workflows', { id }),
   requestBuild: (id: string, workflow: number) => call<void>('request_build', { id, workflow }),
   storage: () => call<StorageItem[]>('storage_items'),

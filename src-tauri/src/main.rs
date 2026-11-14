@@ -69,6 +69,15 @@ async fn local_build(
     blocking(move || m.local_build(&id, trust)).await
 }
 #[tauri::command]
+async fn build_source(
+    manager: tauri::State<'_, relay_core::Manager>,
+    id: String,
+    configuration: Option<relay_core::recipes::BuildConfig>,
+) -> Response<Prepared> {
+    let m = manager.inner().clone();
+    blocking(move || m.build_source(&id, configuration)).await
+}
+#[tauri::command]
 async fn build_plan(
     manager: tauri::State<'_, relay_core::Manager>,
     id: String,
@@ -320,6 +329,7 @@ fn main() {
             prepare_install,
             commit_install,
             local_build,
+            build_source,
             build_plan,
             storage_items,
             scan_caches,

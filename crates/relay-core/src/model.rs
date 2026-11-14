@@ -133,6 +133,8 @@ pub struct App {
     pub desktop_shortcut: bool,
     #[serde(default)]
     pub data_folders: Vec<String>,
+    #[serde(default)]
+    pub build_config: Option<crate::recipes::BuildConfig>,
 }
 
 impl App {
