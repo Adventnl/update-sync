@@ -5,16 +5,14 @@
   line-height: 1.45;
   color: var(--text);
   background: var(--canvas);
-  --canvas: #fafbfc;
+  --canvas: #fafaf9;
   --surface: #ffffff;
-  --sidebar: #edf0f5;
-  --sidebar-selected: #dce5f4;
-  --inset: #f0f2f6;
-  --hover: #eceff4;
-  --text: #242a36;
-  --secondary: #5e6676;
-  --tertiary: #626a79;
-  --line: #e5e8ee;
+  --inset: #efefec;
+  --hover: #e8e8e4;
+  --text: #262625;
+  --secondary: #646461;
+  --tertiary: #6c6c68;
+  --line: #e7e7e3;
   --accent: #1862da;
   --accent-hover: #0c51c3;
   --accent-soft: #e9f0fc;
@@ -29,17 +27,17 @@
   color-scheme: light;
 }
 :root[data-theme='dark'] {
-  --canvas: #1b1d22; --surface: #24272e; --sidebar: #202329; --sidebar-selected: #303f58;
-  --inset: #2c3038; --hover: #343943; --text: #f0f2f6; --secondary: #b3bac8; --tertiary: #a4acbb;
-  --line: #353a44; --accent: #81b2ff; --accent-hover: #a0c4ff; --accent-soft: #293d5a;
+  --canvas: #1c1c1b; --surface: #242423;
+  --inset: #2c2c2a; --hover: #343432; --text: #efefec; --secondary: #b8b8b2; --tertiary: #adada6;
+  --line: #383835; --accent: #81b2ff; --accent-hover: #a0c4ff; --accent-soft: #293d5a;
   --danger: #ff929b; --danger-soft: #492b32; --success: #7cceac; --warning: #e2bc69;
   --shadow: 0 16px 60px #0006, 0 3px 12px #0003; color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --canvas: #1b1d22; --surface: #24272e; --sidebar: #202329; --sidebar-selected: #303f58;
-    --inset: #2c3038; --hover: #343943; --text: #f0f2f6; --secondary: #b3bac8; --tertiary: #a4acbb;
-    --line: #353a44; --accent: #81b2ff; --accent-hover: #a0c4ff; --accent-soft: #293d5a;
+    --canvas: #1c1c1b; --surface: #242423;
+    --inset: #2c2c2a; --hover: #343432; --text: #efefec; --secondary: #b8b8b2; --tertiary: #adada6;
+    --line: #383835; --accent: #81b2ff; --accent-hover: #a0c4ff; --accent-soft: #293d5a;
     --danger: #ff929b; --danger-soft: #492b32; --success: #7cceac; --warning: #e2bc69;
     --shadow: 0 16px 60px #0006, 0 3px 12px #0003; color-scheme: dark;
   }

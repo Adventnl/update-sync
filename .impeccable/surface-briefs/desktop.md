@@ -1,19 +1,19 @@
-# Desktop library
+# Desktop utility
 
-Mode: Operate. Code-first app screen. The user delegated detailed decisions and confirmed system appearance and GitHub CLI access.
+Mode: Operate. Code-led redesign requested by the user on 2026-11-16.
 
 ## Direction contract
 
-THESIS: A personal application library that makes the next action obvious. Keep lifecycle machinery behind the app's contextual controls.
+THESIS: Open, install, and update personal GitHub apps from one compact list.
 
-OWN-WORLD: Native system typography, cool white or graphite surfaces, a translucent-looking neutral sidebar, blue action controls, soft separators, and precise 12px corners. App identity comes from names and restrained monograms.
+WORLD: A quiet native utility with warm neutral surfaces, system typography, small blue actions, and fine separators. No sidebar, search bar, navigation categories, slogans, permanent engineering caveats, or repeated add actions.
 
-STORY: Paste a repository, review the real package, install, and open. Updates preserve a previous version. Storage explains exactly what can be removed.
+FIRST VIEWPORT: Relay at the left, refresh and a settings/storage menu beside one Add app button at the right. The content begins directly with actual app rows, sorted with available updates first, then by name. Each row has a neutral monogram, repository, current state, Open/Update/Install, and contextual actions. Paused apps stay in the same list. No invented inventory or metrics. Empty state says No apps yet and points to Add app.
 
-FIRST VIEWPORT: A 208px sidebar holds Library, Updates, Storage, and Activity. A compact toolbar has search, refresh, and Add app. A large Library title leads actual installed app rows. First run has an honest empty state with one paste-link action. A bottom operation strip reports actual progress and cancellation. App details slide in from the right.
+SECONDARY TASKS: Settings and Storage replace the list and provide Back to apps. App details retain recovery, uninstall, data ownership, and app-specific history. Install is a focused dialog. Live operations retain real progress and cancellation.
 
-FORM: Candidate 4, the native Finder library, inside the user's Apple-inspired brief. The other considered forms were Launchpad, a Music library, a photo contact sheet, a reading list, a document shelf, and a compact collection browser. Catalog challengers were rejected because marketing, ticket coupons, airport signage, and newsprint catalogs reduce product clarity for this brief. seed:6c2bdbe34987fc1a.
+WINDOW: 820×640 initial size, 640×500 minimum. The duplicate native macOS title is hidden. Content is capped at 860px at wider sizes, with no persistent rail. Light, dark, and system appearance remain supported.
 
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+Signature interaction: Details appear only when an app is selected. Context menus keep lifecycle actions out of the app list. Reduced motion is respected.
 
-Signature interaction: context actions open at the cursor, and app details enter with a short spring-like ease. Reduced-motion users get immediate state changes. No invented app inventory, testimonials, or storage claims.
+QUALITY BAR: One Add action, no global navigation or search, real state shown once, all lifecycle functions reachable, visible keyboard focus, concise errors, no clipped names or controls at minimum window size.

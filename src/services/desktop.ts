@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Action, AppRecord, BuildConfig, BuildPlan, Channel, Inspection, Prepared, Progress, Settings, Snapshot, StorageItem, Workflow } from '../types';
@@ -8,6 +9,7 @@ function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args);
 }
 export const desktop = {
+  appearance: (theme: 'light' | 'dark') => isTauri() ? getCurrentWindow().setTheme(theme) : Promise.resolve(),
   snapshot: () => call<Snapshot>('snapshot'),
   inspect: (url: string, channel: Channel) => call<Inspection>('inspect_repository', { url, channel }),
   add: (url: string, channel: Channel) => call<AppRecord>('add_app', { url, channel }),

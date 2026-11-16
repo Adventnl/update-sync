@@ -35,7 +35,6 @@ export interface BuildConfig {
   project: string; target: string | null; output: string | null; entry: string | null; resources: string[];
 }
 export interface Workflow { id: number; name: string; path: string; state: string }
-export type View = 'library' | 'updates' | 'storage' | 'activity' | 'settings' | 'untracked';
 export type Action =
   | { type: 'checkUpdates' }
   | { type: 'launch' | 'repository'; id: string }

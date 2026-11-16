@@ -5,7 +5,7 @@ import App from '../App';
 import type { AppRecord, Channel, Inspection, Snapshot, StorageItem } from '../types';
 import { desktop } from '../services/desktop';
 
-vi.mock('../services/desktop', () => ({ desktop: { snapshot: vi.fn(), listen: vi.fn().mockResolvedValue(() => {}), inspect: vi.fn(), add: vi.fn(), prepare: vi.fn(), commit: vi.fn(), perform: vi.fn(), storage: vi.fn(), prepared: vi.fn(), settings: vi.fn(), token: vi.fn(), folder: vi.fn(), cancel: vi.fn(), buildSource: vi.fn(), buildPlan: vi.fn(), build: vi.fn(), workflows: vi.fn(), scan: vi.fn(), removeCache: vi.fn(), cleanup: vi.fn() } }));
+vi.mock('../services/desktop', () => ({ desktop: { appearance: vi.fn().mockResolvedValue(undefined), snapshot: vi.fn(), listen: vi.fn().mockResolvedValue(() => {}), inspect: vi.fn(), add: vi.fn(), prepare: vi.fn(), commit: vi.fn(), perform: vi.fn(), storage: vi.fn(), prepared: vi.fn(), settings: vi.fn(), token: vi.fn(), folder: vi.fn(), cancel: vi.fn(), buildSource: vi.fn(), buildPlan: vi.fn(), build: vi.fn(), workflows: vi.fn(), scan: vi.fn(), removeCache: vi.fn(), cleanup: vi.fn() } }));
 const snapshot: Snapshot = { apps: [], activity: [], root: 'test-library', platform: 'windows', architecture: 'x86_64', auth: 'Public access', settings: { appearance: 'system', useGithubCli: true, checkOnOpen: false } };
 const inspection: Inspection = { repository: { owner: 'test', name: 'Example' }, repositoryId: 1, description: 'Test fixture application', defaultBranch: 'main', headCommit: 'a'.repeat(40), stacks: ['Rust'], packages: [{ id: 'release-1', name: 'Example-windows.zip', version: 'v1', url: 'https://api.github.com/repos/test/Example/releases/assets/1', commit: null, digest: null, size: 1024, source: 'release', publishedAt: '', compatible: true }], warnings: [], htmlUrl: 'https://github.com/test/Example' };
 beforeEach(() => {
@@ -20,10 +20,33 @@ function record(name: string, id: number, channel: Channel): AppRecord {
 describe('library workflow', () => {
   it('starts with real empty state and opens repository entry', async () => {
     const user = userEvent.setup(); render(<App />);
-    await screen.findByRole('heading', { name: /Your next app/ });
-    await user.click(screen.getByRole('button', { name: 'Add your first app' }));
+    await screen.findByRole('heading', { name: 'No apps yet' });
+    await user.click(screen.getByRole('button', { name: 'Add app' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'GitHub repository' })).toHaveFocus();
+  });
+  it('keeps the main window minimal and secondary tools reachable', async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole('heading', { name: 'No apps yet' });
+    expect(screen.getAllByRole('button', { name: 'Add app' })).toHaveLength(1);
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activity' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Settings and storage' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Settings' }));
+    expect(screen.getByRole('combobox', { name: 'Appearance' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back to apps' }));
+    expect(screen.getByRole('heading', { name: 'No apps yet' })).toBeInTheDocument();
+  });
+  it('keeps paused apps visible and lets them resume from their context menu', async () => {
+    const user = userEvent.setup(); const app = record('Example', 1, 'main'); app.tracked = false;
+    vi.mocked(desktop.snapshot).mockResolvedValue({ ...structuredClone(snapshot), apps: [app] });
+    render(<App />);
+    expect(await screen.findByRole('button', { name: 'View Example' })).toBeInTheDocument();
+    expect(screen.getByText('Updates paused')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Actions for Example' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Resume tracking' }));
+    await waitFor(() => expect(desktop.perform).toHaveBeenCalledWith({ type: 'track', id: 'gh-1', tracked: true }));
   });
   it('compiles and installs from a pasted URL without package selection', async () => {
     const user = userEvent.setup();
@@ -32,7 +55,7 @@ describe('library workflow', () => {
     vi.mocked(desktop.buildSource).mockResolvedValue({ ticket: 'ticket', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
     vi.mocked(desktop.commit).mockResolvedValue(app);
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    await user.click(await screen.findByRole('button', { name: 'Add app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
     await user.click(screen.getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(desktop.commit).toHaveBeenCalledWith('ticket', 'Example.exe'));
@@ -43,7 +66,7 @@ describe('library workflow', () => {
   });
   it('keeps a failed source build recoverable and shows the reason', async () => {
     const user = userEvent.setup(); vi.mocked(desktop.add).mockRejectedValue(new Error('Repository not found.')); render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    await user.click(await screen.findByRole('button', { name: 'Add app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/missing');
     await user.click(screen.getByRole('button', { name: 'Install' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Repository not found.');
@@ -51,9 +74,10 @@ describe('library workflow', () => {
   });
   it('navigates to real storage and respects system appearance', async () => {
     const user = userEvent.setup(); render(<App />);
-    await screen.findByRole('heading', { name: 'Your library' });
-    await user.click(screen.getByRole('button', { name: 'Storage' }));
-    expect(await screen.findByText('Your managed storage is tidy.')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'No apps yet' });
+    await user.click(screen.getByRole('button', { name: 'Settings and storage' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Storage' }));
+    expect(await screen.findByText('Nothing to clean up')).toBeInTheDocument();
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('system'));
   });
   it('opens contextual actions through an accessibility click without pointer events', async () => {
@@ -81,7 +105,7 @@ describe('library workflow', () => {
     vi.mocked(desktop.add).mockResolvedValue(app);
     vi.mocked(desktop.buildSource).mockRejectedValueOnce(new Error('Build configuration needed: choose a project folder.')).mockResolvedValueOnce({ ticket: 'configured', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
     vi.mocked(desktop.commit).mockResolvedValue(app);
-    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add app' }));
     expect(screen.queryByRole('group', { name: 'Build configuration' })).not.toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
     await user.click(screen.getByRole('button', { name: 'Install' }));
@@ -96,7 +120,7 @@ describe('library workflow', () => {
     vi.mocked(desktop.add).mockResolvedValue(app);
     vi.mocked(desktop.buildSource).mockResolvedValue({ ticket: 'retry', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
     vi.mocked(desktop.commit).mockRejectedValueOnce(new Error('Close the running app.')).mockResolvedValueOnce(app);
-    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
     await user.click(screen.getByRole('button', { name: 'Install' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Close the running app.');
@@ -109,7 +133,7 @@ describe('library workflow', () => {
     vi.mocked(desktop.add).mockResolvedValue(app);
     vi.mocked(desktop.buildSource).mockRejectedValueOnce(new Error('Build configuration needed: choose a build system.')).mockResolvedValueOnce({ ticket: 'contract', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
     vi.mocked(desktop.commit).mockResolvedValue(app);
-    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add app' }));
     await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
     await user.click(screen.getByRole('button', { name: 'Install' }));
     await user.clear(await screen.findByRole('textbox', { name: 'Project folder' }));
@@ -123,14 +147,15 @@ describe('library workflow', () => {
     const user = userEvent.setup();
     vi.mocked(desktop.storage).mockRejectedValue(new Error('Disk unavailable.'));
     vi.mocked(desktop.prepared).mockRejectedValue(new Error('Download receipt unavailable.'));
-    render(<App />); await screen.findByRole('heading', { name: 'Your library' });
-    await user.click(screen.getByRole('button', { name: 'Storage' }));
+    render(<App />); await screen.findByRole('heading', { name: 'No apps yet' });
+    await user.click(screen.getByRole('button', { name: 'Settings and storage' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Storage' }));
     await screen.findByText(/Managed storage could not be measured/);
-    expect(screen.queryByText('Your managed storage is tidy.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nothing to clean up')).not.toBeInTheDocument();
     expect(screen.queryByText('0 B available')).not.toBeInTheDocument();
     vi.mocked(desktop.storage).mockResolvedValue([]);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    await screen.findByText('Your managed storage is tidy.');
+    await screen.findByText('Nothing to clean up');
     expect(screen.getByText(/Prepared downloads are unavailable/)).toBeInTheDocument();
   });
   it('preserves the successful scan root and reconciles partially deleted caches', async () => {
@@ -139,7 +164,8 @@ describe('library workflow', () => {
     vi.mocked(desktop.folder).mockResolvedValueOnce('C:/Projects/A').mockResolvedValueOnce('C:/Projects/B');
     vi.mocked(desktop.scan).mockResolvedValueOnce(caches).mockRejectedValueOnce(new Error('Scan denied.'));
     vi.mocked(desktop.removeCache).mockResolvedValueOnce(1024).mockRejectedValueOnce(new Error('File locked.'));
-    render(<App />); await screen.findByRole('heading', { name: 'Your library' }); await user.click(screen.getByRole('button', { name: 'Storage' }));
+    render(<App />); await screen.findByRole('heading', { name: 'No apps yet' }); await user.click(screen.getByRole('button', { name: 'Settings and storage' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Storage' }));
     await user.click(screen.getByRole('button', { name: 'Choose folder…' })); await screen.findByText('Cache one');
     await user.click(screen.getByRole('button', { name: 'Choose folder…' })); await screen.findByText(/The cache scan did not finish/);
     expect(screen.getByText('Scanned C:/Projects/A')).toBeInTheDocument(); expect(screen.queryByText('Scanned C:/Projects/B')).not.toBeInTheDocument();

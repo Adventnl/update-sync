@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, Download, Github, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Download, Github, CheckCircle2 } from 'lucide-react';
 import { AppIcon, Button, Feedback, Modal } from './ui';
 import { desktop } from '../services/desktop';
 import { useStore } from '../hooks/store-context';
@@ -45,7 +45,7 @@ export function InstallDialog({ app, initialPrepared, onClose }: { app?: AppReco
     onClose();
   };
   const field = (key: 'project' | 'target' | 'output' | 'entry', value: string) => setConfig(old => ({ ...old, [key]: key === 'project' ? value : value || null }));
-  return <Modal open onOpenChange={open => { if (!open) close(); }} title={prepared ? 'Choose the application' : app ? `Update ${app.name}` : 'Add an app'} description={prepared ? 'Choose the main application once. Relay remembers it for future updates.' : 'Compile and install the latest source from main.'} busy={busy}>
+  return <Modal open onOpenChange={open => { if (!open) close(); }} title={prepared ? 'Choose the application' : app ? `Update ${app.name}` : 'Add an app'} description={prepared ? 'Choose the main application once. Relay remembers it for future updates.' : 'Install from a GitHub repository.'} busy={busy}>
     {!prepared && <form onSubmit={event => { event.preventDefault(); void install(configure ? config : null); }} className="repository-form">
       <label htmlFor="repository-url">GitHub repository</label><div className="repository-input"><Github size={18} /><input id="repository-url" type="url" required autoFocus={!app} placeholder="https://github.com/you/your-app" value={url} disabled={!!app || busy} onChange={event => { setUrl(event.target.value); setRecord(undefined); setLocalError(null); setConfigure(false); setConfig(defaultConfig); }} /></div>
       {record && <div className="repository-summary"><AppIcon name={record.name} /><div><strong>{record.name}</strong><p>{record.description}</p></div></div>}
@@ -58,11 +58,11 @@ export function InstallDialog({ app, initialPrepared, onClose }: { app?: AppReco
         <label htmlFor="build-entry">Launch file within the built application, if needed</label><input id="build-entry" value={config.entry ?? ''} onChange={e => field('entry', e.target.value)} placeholder="Choose automatically" />
         <label htmlFor="build-resources">Additional resource paths, one per line</label><textarea id="build-resources" value={config.resources.join('\n')} onChange={e => setConfig(old => ({ ...old, resources: e.target.value.split('\n').filter(Boolean) }))} placeholder="assets" /></>}
       </fieldset>}
-      <p className="help-text">Install runs this repository's build code on your computer. Only install repositories you trust. The required compiler or SDK must be installed.</p>
+      <p className="help-text">Only install repositories you trust; their build code runs on this computer.</p>
       <div className="dialog-footer"><Button type="button" variant="ghost" disabled={busy} onClick={close}>Cancel</Button><Button type="submit" variant="primary" disabled={busy || !url || (configure && config.system !== 'app' && !config.project)}><Download size={16} />{configure ? 'Save and retry' : localError ? 'Retry installation' : app?.activeVersion ? 'Update' : 'Install'}</Button></div>
     </form>}
     {prepared && <div className="entry-choice"><CheckCircle2 size={26} className="success-text" /><p>The application is built and ready to install.</p><label htmlFor="launch-file">Application to open</label><select id="launch-file" className="wide-select" value={entry} disabled={busy} onChange={e => setEntry(e.target.value)}>{prepared.entries.map(path => <option key={path}>{path}</option>)}</select>{localError && <Feedback error>{localError}</Feedback>}<div className="dialog-footer"><Button disabled={busy} onClick={() => void run(async () => { await desktop.perform({ type: 'discard', ticket: prepared.ticket }); onClose(); })}>Discard build</Button><Button variant="primary" disabled={busy || !entry} onClick={() => void run(async () => { await desktop.commit(prepared.ticket, entry); notify('Installed and ready to open.'); onClose(); })}>Finish installation<ArrowRight size={15} /></Button></div></div>}
-    {!prepared && !localError && <div className="install-assurance"><ShieldCheck size={17} /><span>Build files and dependency caches are removed automatically.<br />Your settings and previous version are kept.</span></div>}
+
     {busy && <div className="dialog-operation" role="status" aria-live="polite"><strong>{progress?.message ?? 'Preparing your application...'}</strong>{progress?.total ? <><progress max={progress.total} value={progress.completed} aria-label="Source download" /><span>{bytes(progress.completed)} of {bytes(progress.total)}</span></> : <progress aria-label="Installation progress" />}<Button variant="ghost" onClick={() => void desktop.cancel()}>Cancel operation</Button></div>}
   </Modal>;
 }

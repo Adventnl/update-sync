@@ -56,7 +56,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (snapshot.settings.checkOnOpen && snapshot.apps.some(a => a.tracked)) void act({ type: 'checkUpdates' });
   }, [snapshot, act]);
   useEffect(() => {
-    document.documentElement.dataset.theme = snapshot?.settings.appearance ?? 'system';
-  }, [snapshot?.settings.appearance]);
+    const appearance = snapshot?.settings.appearance ?? 'system';
+    document.documentElement.dataset.theme = appearance;
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const sync = () => {
+      const theme = appearance === 'system' ? media?.matches ? 'dark' : 'light' : appearance;
+      void desktop.appearance(theme).catch(e => notify(`Window appearance could not be updated: ${message(e)}`, true));
+    };
+    sync();
+    if (appearance === 'system') media?.addEventListener('change', sync);
+    return () => media?.removeEventListener('change', sync);
+  }, [snapshot?.settings.appearance, notify]);
   return <StoreContext.Provider value={{ snapshot, loading, error, busy, progress, notices, refresh, notify, run, act, dismiss: id => setNotices(old => old.filter(n => n.id !== id)) }}>{children}</StoreContext.Provider>;
 }
