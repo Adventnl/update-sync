@@ -35,12 +35,14 @@ impl Integration for NativeIntegration {
 }
 
 pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    let mut cmd = Command::new(program);
+    let cmd = Command::new(program);
     #[cfg(windows)]
-    {
+    let cmd = {
         use std::os::windows::process::CommandExt;
+        let mut cmd = cmd;
         cmd.creation_flags(0x08000000);
-    }
+        cmd
+    };
     cmd
 }
 
@@ -359,6 +361,8 @@ fn shortcut(path: &Path, app: &App, launcher: &Path, store: &Store, remove: bool
 }
 
 pub fn remove_integration(store: &Store, app: &App, launcher: &Path) -> Result<()> {
+    #[cfg(not(windows))]
+    let _ = launcher;
     #[cfg(windows)]
     {
         use winreg::{enums::HKEY_CURRENT_USER, RegKey};
@@ -473,7 +477,7 @@ pub fn extract_dmg(package: &Path, destination: &Path) -> Result<()> {
         );
         result?;
         detach?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {

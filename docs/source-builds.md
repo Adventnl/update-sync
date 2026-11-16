@@ -2,6 +2,18 @@
 
 Install and Update always resolve the current `main` commit before downloading source. A saved configuration selects how to build it. It never pins future updates to an old commit. Detection reads manifests from that exact snapshot and does not use AI.
 
+## Explicit application builds
+
+The preferred repository contract is root `relay.app.json`. It names the app's exact build steps, complete output folder, and launch entry for each supported host OS/CPU. Commands can use any installed language toolchain, including languages outside Relay's built-in recipes. A mixed-language app can build its components in sequence and collect their runtime files together.
+
+Use the [Relay app skill](../skills/relay-app/SKILL.md) to prepare repositories. The [contract reference](../skills/relay-app/references/contract.md) specifies all fields, paths, execution variables, and platform behavior; the [schema](../skills/relay-app/references/relay.app.schema.json) supports editor validation. `relay-cli check-build <repository> --target <os-arch>` validates without executing build code.
+
+Explicit per-install configuration wins. Otherwise an app contract takes precedence over saved legacy recipes, `relay.build.json`, and automatic detection. `system: "app"` explicitly selects the repository contract. Its commands and output paths are reloaded on every update. An invalid contract or absent host target stops the build, without falling back to an unrelated package. The output folder is emptied before the declared steps run. Missing output or launch entry stops installation, even if the commands succeed.
+
+`SKILL.md` guides setup; Relay only executes the machine-readable contract and committed build scripts. Command dispatch is deterministic and needs no AI. Reproducibility also depends on toolchain versions, lockfiles, and the repository's build logic.
+
+## Legacy recipe configuration
+
 Relay prefers a desktop framework over its language manifest. A single nested Tauri or Electron application also takes precedence over a root Cargo workspace. Otherwise, a single root recipe wins, or one nested project is selected. Multiple candidates require configuration rather than guessing. Detection scans at most four directory levels and 20,000 entries, skipping dependency, build, test, and example directories.
 
 The configuration form appears after detection or output selection fails. It saves the selected build system and paths for subsequent updates. To share the same configuration with other installations, a repository may include `relay.build.json` at its root:
@@ -25,7 +37,7 @@ The configuration form appears after detection or output selection fails. It sav
 | `entry` | Launch file within the final output. A missing configured entry stops the update. |
 | `resources` | Additional project files or directories to copy into the application with their relative paths preserved. |
 
-Paths must remain inside managed directories. Configuration cannot provide shell commands or command-line switches. Unknown fields are rejected. Explicit saved configuration overrides repository configuration. Without an explicit entry, Relay reuses the active version's launch path, matches the repository name when unique, or asks for a selection if several candidates remain.
+Paths must remain inside managed directories. Legacy recipe configuration cannot provide shell commands or command-line switches; use the app contract for custom builds. Unknown fields are rejected. Saved legacy configuration overrides `relay.build.json` and detection, while `relay.app.json` takes precedence over those saved choices. Without an explicit entry, Relay reuses the active version's launch path, matches the repository name when unique, or asks for a selection if several candidates remain.
 
 ## Recipe behavior
 
@@ -47,7 +59,7 @@ Go uses `go build -mod=readonly -trimpath`, targeting the module root or configu
 
 ## Toolchains and recovery
 
-The required SDKs, compilers, Node package manager, and system development libraries must be installed. Relay does not silently install global toolchains. Missing tools produce an error with a retry action. Repositories requiring submodules or build systems outside these recipes need project changes.
+The required SDKs, compilers, Node package manager, and system development libraries must be installed. Relay does not silently install global toolchains. Missing tools produce an error with a retry action. Build systems outside the legacy recipes can use an app contract. Repositories requiring submodules need self-contained source snapshots.
 
 Build commands run under the user account with network access. Managed workspaces limit clutter and prevent writes through configured paths outside those folders. They are not a security sandbox for repository code.
 

@@ -21,6 +21,12 @@ Use `npm run desktop:build` to build platform packages. The packaging workflow b
 
 ## Source builds
 
+For an explicit application build, commit a root `relay.app.json` describing platform-specific commands, the complete output folder, and the launch entry. This contract supports any language or mixed stack through its installed toolchains. Relay runs the declared steps without AI and installs the declared app, instead of guessing from package manifests.
+
+Use the reusable [Relay app setup skill](skills/relay-app/SKILL.md) to prepare another repository or generate its app-specific build skill. See the [contract reference](skills/relay-app/references/contract.md) and [JSON schema](skills/relay-app/references/relay.app.schema.json). Check a contract without executing it with `cargo run -p relay-cli -- check-build /path/to/app --target macos-aarch64`.
+
+Repositories without an app contract retain these automatic recipes:
+
 | Build system | Automatic recipe |
 | --- | --- |
 | Rust / Cargo | Release build, committed lockfile when present, executable and native libraries |
@@ -36,7 +42,7 @@ Node projects need a committed npm, pnpm, or Yarn lockfile and the corresponding
 
 Relay checks root manifests and nested projects up to four folders deep. Framework manifests take precedence over their implementation language. Ambiguous layouts open a configuration form. Choose the build system, project folder, and any target, output folder, launch file, or resources once. Relay saves those choices for future updates. A chosen launch file is reused when it exists in the next build. See [source build configuration](docs/source-builds.md) for recipe details and optional repository-owned configuration.
 
-Repositories must have a `main` branch. Source snapshots do not include Git submodule contents. Custom toolchains, platform signing requirements, projects needing privileged installers, and unsupported build systems may need project changes. Relay reports a failure while keeping the installed version active. It cannot infer arbitrary packaging steps.
+Repositories must have a `main` branch. Source snapshots do not include Git submodule contents. App contracts can declare custom build and packaging steps, but toolchains must be installed and the output must use a supported desktop launch format. Platform signing requirements and projects needing privileged installers may need separate integration. Relay reports a failure while keeping the installed version active.
 
 ## GitHub access
 
@@ -75,4 +81,4 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-Windows builds and engine/React tests have been exercised locally. macOS CI and packaging are configured but have not been run in this Windows session. Signing credentials must be supplied for production distribution. See [architecture](docs/architecture.md) and [security](docs/security.md) for the transaction, trust model, and limits.
+The app-contract changes passed workspace tests and Clippy, frontend checks, schema and CLI validation, and skill validation locally on macOS. Tests compile a real app through declared commands and verify runtime files and failed-build recovery. Windows execution and packaged installation were not exercised in this session. Signing credentials must be supplied for production distribution. See [architecture](docs/architecture.md) and [security](docs/security.md) for the transaction, trust model, and limits.

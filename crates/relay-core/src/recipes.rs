@@ -1,4 +1,4 @@
-//! Deterministic source recipes. Configuration selects a recipe and paths, never shell commands.
+//! Deterministic source recipes and repository-owned application contracts.
 use crate::store::safe_child;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BuildSystem {
+    App,
     Tauri,
     Electron,
     Cargo,
@@ -67,12 +68,14 @@ impl BuildConfig {
             .chain(self.entry.iter())
             .chain(self.resources.iter())
         {
-            anyhow::ensure!(
-                !value.starts_with('-')
-                    && value.len() <= 500
-                    && !value.contains(['\r', '\n', '%', '!', '&', '|', '<', '>', '^', '"']),
-                "Invalid build configuration value."
-            );
+            if self.system != BuildSystem::App {
+                anyhow::ensure!(
+                    !value.starts_with('-')
+                        && value.len() <= 500
+                        && !value.contains(['\r', '\n', '%', '!', '&', '|', '<', '>', '^', '"']),
+                    "Invalid build configuration value."
+                );
+            }
             // Targets are names or project-relative paths, never command-line switches.
             if value != "." {
                 safe_child(&project, value)?;
@@ -131,6 +134,9 @@ fn systems(path: &Path) -> Result<Vec<BuildSystem>> {
 }
 
 pub fn detect(root: &Path) -> Result<BuildConfig> {
+    if crate::app_contract::exists(root)? {
+        return crate::app_contract::load(root).map(|app| app.config());
+    }
     // An optional repository-owned recipe uses the same restricted schema as saved configuration.
     let manifest = root.join("relay.build.json");
     if manifest.is_file() {
@@ -206,6 +212,29 @@ pub fn detect(root: &Path) -> Result<BuildConfig> {
     anyhow::bail!("Build configuration needed: {}. Select a build system and project folder once. Detected projects: {}", if root_systems.is_empty() && candidates.is_empty() { "no supported application manifest was found" } else { "more than one build system or application was found" }, if choices.is_empty() { "repository root" } else { &choices })
 }
 
+/// Explicit user choices win. A repository app contract supersedes older saved
+/// recipe guesses; its commands and output paths are reloaded at every commit.
+pub fn resolve(
+    root: &Path,
+    explicit: Option<&BuildConfig>,
+    saved: Option<&BuildConfig>,
+) -> Result<BuildConfig> {
+    let selected = if let Some(config) = explicit {
+        config.clone()
+    } else if crate::app_contract::exists(root)? {
+        return detect(root);
+    } else if let Some(config) = saved {
+        config.clone()
+    } else {
+        return detect(root);
+    };
+    if selected.system == BuildSystem::App {
+        return crate::app_contract::load(root).map(|app| app.config());
+    }
+    selected.validate(root)?;
+    Ok(selected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +288,49 @@ mod tests {
         )
         .unwrap();
         assert!(detect(tmp.path()).is_err());
+    }
+    #[test]
+    fn app_contract_precedes_saved_language_recipe_and_is_reloaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Cargo.toml"), "[workspace]").unwrap();
+        let legacy = BuildConfig::new(BuildSystem::Cargo, ".".into());
+        let manifest = |entry: &str| {
+            serde_json::json!({"version":1,"targets":{
+                (crate::app_contract::current_target()): {"steps":[{"program":"custom-compiler"}],"output":"dist/app","entry":entry}
+            }})
+        };
+        let entry = if cfg!(target_os = "macos") {
+            "Desktop.app"
+        } else {
+            "Desktop.exe"
+        };
+        fs::write(
+            tmp.path().join(crate::app_contract::MANIFEST),
+            manifest(entry).to_string(),
+        )
+        .unwrap();
+        let first = resolve(tmp.path(), None, Some(&legacy)).unwrap();
+        assert_eq!(first.system, BuildSystem::App);
+        assert_eq!(resolve(tmp.path(), Some(&legacy), None).unwrap(), legacy);
+        let entry = if cfg!(target_os = "macos") {
+            "Renamed.app"
+        } else {
+            "Renamed.exe"
+        };
+        fs::write(
+            tmp.path().join(crate::app_contract::MANIFEST),
+            manifest(entry).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve(tmp.path(), None, Some(&first))
+                .unwrap()
+                .entry
+                .as_deref(),
+            Some(entry)
+        );
+        fs::write(tmp.path().join(crate::app_contract::MANIFEST), "invalid").unwrap();
+        // A broken explicit app contract must never silently build a workspace binary.
+        assert!(resolve(tmp.path(), None, Some(&legacy)).is_err());
     }
 }

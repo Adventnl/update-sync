@@ -236,6 +236,113 @@ fn recovery_deletes_only_owned_build_caches_and_keeps_prepared_content() {
 }
 
 #[test]
+fn app_contract_runs_declared_steps_and_preserves_complete_output() {
+    use crate::{app_contract, recipes};
+    let (_temp, m, _) = setup();
+    let work = tempfile::tempdir_in(m.root.join("builds")).unwrap();
+    let project = work.path().join("source with spaces");
+    fs::create_dir_all(project.join("tools")).unwrap();
+    // No Cargo/package/language manifests: the engine only follows the contract.
+    fs::write(
+        project.join("application.rs"),
+        "fn main() { println!(\"contract app\"); }",
+    )
+    .unwrap();
+    fs::write(project.join("builder.rs"), r#"
+use std::{env, fs, path::PathBuf, process::Command};
+fn main() {
+    let output = PathBuf::from(env::var_os("RELAY_OUTPUT_DIR").unwrap());
+    assert_eq!(env::var("RELAY_PLATFORM").unwrap(), env::consts::OS);
+    assert_eq!(env::var("RELAY_ARCH").unwrap(), env::consts::ARCH);
+    assert!(PathBuf::from(env::var_os("RELAY_PROJECT_DIR").unwrap()).join("application.rs").is_file());
+    assert!(!output.join("stale.txt").exists());
+    let binary = if cfg!(target_os="macos") {
+        let contents = output.join("Helper.app/Contents");
+        fs::create_dir_all(contents.join("MacOS")).unwrap();
+        fs::write(contents.join("Info.plist"), "fixture plist").unwrap();
+        contents.join("MacOS/Application")
+    } else { output.join("Helper.exe") };
+    assert!(Command::new("rustc").arg("application.rs").arg("-o").arg(binary).status().unwrap().success());
+    fs::create_dir_all(output.join("assets/nested")).unwrap();
+    fs::write(output.join("assets/nested/model.bin"), "runtime asset").unwrap();
+}
+"#).unwrap();
+    let builder = if cfg!(windows) {
+        "tools/builder.exe"
+    } else {
+        "tools/builder"
+    };
+    let entry = if cfg!(target_os = "macos") {
+        "Helper.app"
+    } else {
+        "Helper.exe"
+    };
+    let manifest = serde_json::json!({"version":1,"targets":{
+        (app_contract::current_target()): {
+            "steps":[
+                {"program":"rustc","args":["builder.rs","-o",builder]},
+                {"program":builder}
+            ],"output":"dist/app","entry":entry
+        }
+    }});
+    fs::write(
+        project.join(app_contract::MANIFEST),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::create_dir_all(project.join("dist/app")).unwrap();
+    fs::write(project.join("dist/app/stale.txt"), "old artifact").unwrap();
+    let config = recipes::detect(&project).unwrap();
+    let environment = work.path().join("environment");
+    let output = work.path().join("package");
+    fs::create_dir(&environment).unwrap();
+    fs::create_dir(&output).unwrap();
+    m.compile_project("gh-1", &project, &environment, &output, "gh-1", &config)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(output.join("assets/nested/model.bin")).unwrap(),
+        "runtime asset"
+    );
+    assert!(!output.join("stale.txt").exists());
+    let executable = if cfg!(target_os = "macos") {
+        output.join("Helper.app/Contents/MacOS/Application")
+    } else {
+        output.join(entry)
+    };
+    let result = std::process::Command::new(executable).output().unwrap();
+    assert!(result.status.success());
+    assert_eq!(
+        String::from_utf8(result.stdout).unwrap().trim(),
+        "contract app"
+    );
+    let entries = app_contract::validate_output(&output, entry).unwrap();
+    let mut package = crate::github::source_package(&app().repository, &"a".repeat(40)).unwrap();
+    package.source = "local".into();
+    let prepared = m
+        .persist_prepared(&app(), package, "source-digest".into(), &output, entries)
+        .unwrap();
+    let installed = m.commit(&prepared.ticket, entry).unwrap();
+    let data = m.store().unwrap().app_dir("gh-1").unwrap().join("data");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join("settings.json"), "keep").unwrap();
+    // A successful command without its declared app is still a failed build.
+    fs::write(project.join("builder.rs"), "fn main() {}").unwrap();
+    fs::create_dir(&output).unwrap();
+    assert!(m
+        .compile_project("gh-1", &project, &environment, &output, "gh-1", &config)
+        .is_err());
+    assert_eq!(
+        m.store().unwrap().app("gh-1").unwrap().active_version,
+        installed.active_version
+    );
+    assert_eq!(
+        fs::read_to_string(data.join("settings.json")).unwrap(),
+        "keep"
+    );
+    assert!(m.verify("gh-1").unwrap().is_empty());
+}
+
+#[test]
 fn actual_cargo_source_compiles_and_failed_rebuild_keeps_data_and_active_version() {
     use crate::recipes::{BuildConfig, BuildSystem};
     let (_temp, m, _) = setup();

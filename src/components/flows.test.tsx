@@ -104,6 +104,21 @@ describe('library workflow', () => {
     await waitFor(() => expect(desktop.commit).toHaveBeenCalledTimes(2));
     expect(desktop.buildSource).toHaveBeenCalledTimes(1);
   });
+  it('can select the repository app contract without overriding its paths', async () => {
+    const user = userEvent.setup(); const app = record('Example', 1, 'main');
+    vi.mocked(desktop.add).mockResolvedValue(app);
+    vi.mocked(desktop.buildSource).mockRejectedValueOnce(new Error('Build configuration needed: choose a build system.')).mockResolvedValueOnce({ ticket: 'contract', appId: app.id, package: inspection.packages[0], digest: 'hash', entries: ['Example.exe'], previous: null });
+    vi.mocked(desktop.commit).mockResolvedValue(app);
+    render(<App />); await user.click(await screen.findByRole('button', { name: 'Add your first app' }));
+    await user.type(screen.getByRole('textbox', { name: 'GitHub repository' }), 'https://github.com/test/Example');
+    await user.click(screen.getByRole('button', { name: 'Install' }));
+    await user.clear(await screen.findByRole('textbox', { name: 'Project folder' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Build system' }), 'app');
+    expect(screen.queryByRole('textbox', { name: 'Project folder' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save and retry' }));
+    await waitFor(() => expect(desktop.buildSource).toHaveBeenLastCalledWith('gh-1', expect.objectContaining({ system: 'app' })));
+    await waitFor(() => expect(desktop.commit).toHaveBeenCalledWith('contract', 'Example.exe'));
+  });
   it('keeps storage failures separate and never reports failed measurements as tidy', async () => {
     const user = userEvent.setup();
     vi.mocked(desktop.storage).mockRejectedValue(new Error('Disk unavailable.'));

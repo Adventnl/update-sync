@@ -28,12 +28,15 @@ pub struct BuildPlan {
 
 pub fn plan(stacks: &[String]) -> Result<BuildPlan> {
     let stack = [
-        "Tauri", "Electron", "Rust", "Cargo", "C++", "Cmake", "Java", "Maven", "Gradle", "Python",
-        "Go", ".NET", "Dotnet",
+        "App", "Tauri", "Electron", "Rust", "Cargo", "C++", "Cmake", "Java", "Maven", "Gradle",
+        "Python", "Go", ".NET", "Dotnet",
     ]
     .into_iter()
     .find(|name| stacks.iter().any(|s| s == name))
-    .context("Build configuration needed: select a build system and project folder.")?;
+    // A plan is descriptive; only the pinned repository contract determines
+    // whether the app can build. Never reject an unfamiliar language label here.
+    .or_else(|| stacks.first().map(String::as_str))
+    .unwrap_or("App");
     Ok(BuildPlan { stack: stack.into(), steps: vec!["Download the latest main commit".into(), "Detect and compile the application".into(), "Install and remove build files".into()], warning: "Builds execute repository code with your user permissions. Managed folders are not a security sandbox.".into() })
 }
 
@@ -92,12 +95,8 @@ impl Manager {
             );
             let root = directories[0].path();
             anyhow::ensure!(!root.join(".gitmodules").exists(), "This project uses Git submodules. Source snapshots do not include their contents; this repository needs a self-contained source layout.");
-            let config = configuration
-                .as_ref()
-                .or(app.build_config.as_ref())
-                .cloned()
-                .map(Ok)
-                .unwrap_or_else(|| recipes::detect(&root))?;
+            let config =
+                recipes::resolve(&root, configuration.as_ref(), app.build_config.as_ref())?;
             if configuration.is_some() {
                 config.validate(&root)?;
                 // "Save and retry" must retain the user's choice even if compilation fails.
@@ -124,7 +123,14 @@ impl Manager {
             }
             self.check_cancelled()?;
             anyhow::ensure!(managed_size(&workspace_root) <= BUILD_LIMIT, "Build stopped because its output exceeded the 12 GB workspace limit. Your installed application has not changed.");
-            let entries = archive::entries(&output)?;
+            let entries = if config.system == BuildSystem::App {
+                crate::app_contract::validate_output(
+                    &output,
+                    config.entry.as_deref().context("Missing app entry.")?,
+                )?
+            } else {
+                archive::entries(&output)?
+            };
             anyhow::ensure!(!entries.is_empty(), "Build configuration needed: the build produced no runnable application. Select the output folder and application entry.");
             let entries = choose_entries(
                 entries,
@@ -135,6 +141,17 @@ impl Manager {
             #[cfg(target_os = "macos")]
             for entry in &entries {
                 if entry.ends_with(".app") {
+                    if config.system == BuildSystem::App
+                        && platform::command("/usr/bin/codesign")
+                            .args(["--verify", "--deep", "--strict"])
+                            .arg(output.join(entry))
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status()?
+                            .success()
+                    {
+                        continue;
+                    }
                     let status = platform::command("/usr/bin/codesign")
                         .args(["--force", "--deep", "--sign", "-", "--timestamp=none"])
                         .arg(output.join(entry))
@@ -175,10 +192,40 @@ impl Manager {
         let environment = dunce::simplified(environment);
         let output = dunce::simplified(output);
         let project = config.validate(root)?;
-        let run =
-            |program: &str, args: &[&str]| self.run_build(id, &project, environment, program, args);
+        let run = |program: &str, args: &[&str]| {
+            self.run_build(id, &project, environment, program, args, None)
+        };
         let target_dir = environment.join("target");
         match config.system {
+            BuildSystem::App => {
+                let app = crate::app_contract::load(root)?;
+                anyhow::ensure!(
+                    &app.config() == config,
+                    "The app build contract changed. Retry the build."
+                );
+                let app_output = safe_child(&project, &app.target.output)?;
+                // Never install stale artifacts committed to the source snapshot.
+                if app_output.exists() {
+                    fs::remove_dir_all(&app_output)
+                        .context("Could not clear the app output folder.")?;
+                }
+                fs::create_dir_all(&app_output)?;
+                for step in &app.target.steps {
+                    let program = app.program(&project, &step.program)?;
+                    let args: Vec<_> = step.args.iter().map(String::as_str).collect();
+                    self.run_build(
+                        id,
+                        &project,
+                        environment,
+                        &program,
+                        &args,
+                        Some(&app_output),
+                    )?;
+                }
+                // Recheck paths after repository code has run.
+                let app_output = safe_child(&project, &app.target.output)?;
+                crate::app_contract::validate_output(&app_output, &app.target.entry)?;
+            }
             BuildSystem::Cargo => {
                 let mut args = vec!["build", "--release"];
                 if project.join("Cargo.lock").exists() || root.join("Cargo.lock").exists() {
@@ -482,7 +529,12 @@ impl Manager {
             }
         }
         if let Some(folder) = &config.output {
-            copy_tree(&safe_child(&project, folder)?, output)?;
+            let project = config.validate(root)?;
+            copy_tree_with_links(
+                &safe_child(&project, folder)?,
+                output,
+                config.system == BuildSystem::App,
+            )?;
         }
         Ok(())
     }
@@ -493,6 +545,7 @@ impl Manager {
         environment: &Path,
         program: &str,
         args: &[&str],
+        app_output: Option<&Path>,
     ) -> Result<()> {
         self.check_cancelled()?;
         self.report(
@@ -518,6 +571,12 @@ impl Manager {
         };
         // Repository code must be trusted even with a clean environment. It can access the user account.
         cmd.env_clear();
+        if let Some(output) = app_output {
+            cmd.env("RELAY_OUTPUT_DIR", output)
+                .env("RELAY_PROJECT_DIR", project)
+                .env("RELAY_PLATFORM", std::env::consts::OS)
+                .env("RELAY_ARCH", std::env::consts::ARCH);
+        }
         for name in [
             "PATH",
             "SystemRoot",
@@ -599,7 +658,11 @@ impl Manager {
         cmd.stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log.try_clone()?));
         let mut child = cmd.spawn().with_context(|| {
-            format!("{program} is not available. Install the {program} toolchain, then retry Install. No build commands are needed.")
+            if program.contains(['/', '\\']) {
+                format!("The repository build program {program} could not start. Check the declared build steps, then retry.")
+            } else {
+                format!("{program} is not available. Install the {program} toolchain, then retry Install.")
+            }
         })?;
         #[cfg(windows)]
         let _job = match BuildJob::attach(&child) {
@@ -668,6 +731,9 @@ impl Manager {
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
+    copy_tree_with_links(source, destination, false)
+}
+fn copy_tree_with_links(source: &Path, destination: &Path, app_contract: bool) -> Result<()> {
     anyhow::ensure!(
         source.is_dir(),
         "The expected package folder was not produced."
@@ -683,10 +749,27 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
             .to_str()
             .context("Unsupported build output name.")?;
         let target = safe_child(destination, relative)?;
-        anyhow::ensure!(
-            !crate::store::is_link(&fs::symlink_metadata(entry.path())?),
-            "The build output contains links. Publish a signed macOS archive instead."
-        );
+        if crate::store::is_link(&fs::symlink_metadata(entry.path())?) {
+            anyhow::ensure!(
+                app_contract && cfg!(target_os = "macos"),
+                "The build output contains unsupported links."
+            );
+            let link = fs::read_link(entry.path())?;
+            anyhow::ensure!(
+                !link.is_absolute()
+                    && entry
+                        .path()
+                        .canonicalize()?
+                        .starts_with(source.canonicalize()?),
+                "A build output link points outside the app folder."
+            );
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            #[cfg(target_os = "macos")]
+            std::os::unix::fs::symlink(link, target)?;
+            continue;
+        }
         if entry.file_type().is_dir() {
             fs::create_dir_all(target)?;
         } else {
@@ -1010,6 +1093,14 @@ fn choose_entries(
 mod tests {
     use super::*;
     #[test]
+    fn build_plans_do_not_gate_unfamiliar_languages() {
+        assert_eq!(
+            plan(&["UnfamiliarLanguage".into()]).unwrap().stack,
+            "UnfamiliarLanguage"
+        );
+        assert_eq!(plan(&[]).unwrap().stack, "App");
+    }
+    #[test]
     fn launch_choice_survives_updates_and_missing_explicit_entry_is_an_error() {
         let entries = vec!["Helper.exe".into(), "Desktop.exe".into()];
         assert_eq!(
@@ -1061,5 +1152,60 @@ mod tests {
         writer.write_all(b"Manifest-Version: 1.0\n").unwrap();
         writer.finish().unwrap();
         assert!(collect_jars(tmp.path(), out.path()).is_err());
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_output_preserves_internal_links_and_rejects_escape() {
+        use std::os::unix::fs::symlink;
+        let source = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        fs::create_dir_all(
+            source
+                .path()
+                .join("Example.app/Contents/Frameworks/Versions/A"),
+        )
+        .unwrap();
+        fs::write(
+            source
+                .path()
+                .join("Example.app/Contents/Frameworks/Versions/A/library"),
+            "runtime",
+        )
+        .unwrap();
+        symlink(
+            "A",
+            source
+                .path()
+                .join("Example.app/Contents/Frameworks/Versions/Current"),
+        )
+        .unwrap();
+        copy_tree_with_links(source.path(), output.path(), true).unwrap();
+        assert_eq!(
+            fs::read_to_string(
+                output
+                    .path()
+                    .join("Example.app/Contents/Frameworks/Versions/Current/library")
+            )
+            .unwrap(),
+            "runtime"
+        );
+        assert_eq!(
+            fs::read_link(
+                output
+                    .path()
+                    .join("Example.app/Contents/Frameworks/Versions/Current")
+            )
+            .unwrap(),
+            PathBuf::from("A")
+        );
+        assert!(archive::inventory(output.path()).is_ok());
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret"), "outside").unwrap();
+        let bad = tempfile::tempdir().unwrap();
+        symlink(outside.path().join("secret"), bad.path().join("escape")).unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        assert!(copy_tree_with_links(bad.path(), destination.path(), true).is_err());
+        let legacy_output = tempfile::tempdir().unwrap();
+        assert!(copy_tree(source.path(), legacy_output.path()).is_err());
     }
 }

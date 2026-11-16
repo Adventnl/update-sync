@@ -1,3 +1,4 @@
+pub mod app_contract;
 pub mod archive;
 pub mod build;
 pub mod data;

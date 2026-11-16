@@ -10,6 +10,8 @@ Windows checks Authenticode when present and rejects invalid signatures. Downloa
 
 Relay does not claim to sandbox installed applications or build scripts. It does not run privileged installers, add drivers, install services, clear global package caches, or guess uninstall commands. Such installers need a dedicated adapter with a native uninstall identity and its own recovery policy before they can be managed safely.
 
+`relay.app.json` can declare arbitrary repository build commands, including explicit script interpreters. These execute under the same trust model as Cargo build scripts or package-manager lifecycle scripts. The engine bounds the manifest, checks managed project/output paths, selects an exact host target, and uses the existing reduced environment and command limits. It does not audit script behavior. Relative macOS output links must resolve within the copied application folder; Windows links and absolute output links are rejected. Legacy `relay.build.json` and saved recipe configurations still cannot embed commands.
+
 Ownership checks protect against accidental deletion and path traversal. They are not a security boundary against an attacker already running as the same user, who can alter Relay's database or files. Relay runs without administrator rights and never elevates its cleanup process.
 
 External user-data removal is opt-in. A folder must be explicitly selected, lie in an allowed per-user data area, avoid shared platform folders and overlap with other apps, and carry a matching ownership marker. Missing or changed markers stop removal. Unregistered data is kept.

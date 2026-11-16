@@ -180,6 +180,7 @@ impl Github {
             Ok(entries) => {
                 let names: Vec<_> = entries.iter().map(|v| v.name.as_str()).collect();
                 for (files, stack) in [
+                    (&["relay.app.json"][..], "App"),
                     (&["Cargo.toml"][..], "Rust"),
                     (&["src-tauri", "tauri.conf.json"][..], "Tauri"),
                     (&["CMakeLists.txt", "meson.build"][..], "C++"),

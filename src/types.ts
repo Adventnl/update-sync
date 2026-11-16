@@ -31,7 +31,7 @@ export interface Prepared { ticket: string; appId: string; package: Package; dig
 export interface StorageItem { id: string; name: string; path: string; size: number; kind: string; appId: string | null; detail: string }
 export interface BuildPlan { stack: string; steps: string[]; warning: string }
 export interface BuildConfig {
-  system: 'tauri' | 'electron' | 'cargo' | 'cmake' | 'maven' | 'gradle' | 'python' | 'go' | 'dotnet';
+  system: 'app' | 'tauri' | 'electron' | 'cargo' | 'cmake' | 'maven' | 'gradle' | 'python' | 'go' | 'dotnet';
   project: string; target: string | null; output: string | null; entry: string | null; resources: string[];
 }
 export interface Workflow { id: number; name: string; path: string; state: string }

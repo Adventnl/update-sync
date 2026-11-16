@@ -16,6 +16,13 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Validate a repository app contract without running build code.
+    CheckBuild {
+        path: PathBuf,
+        /// For example: windows-x86_64 or macos-aarch64. Defaults to this machine.
+        #[arg(long)]
+        target: Option<String>,
+    },
     List,
     /// Compile main and install it. Configuration is saved for future updates.
     Install {
@@ -143,6 +150,15 @@ fn main() -> anyhow::Result<()> {
         _ => arg,
     });
     let args = Args::parse_from(raw);
+    if let Command::CheckBuild { path, target } = &args.command {
+        let path = std::fs::canonicalize(path)?;
+        let selected = app_contract::load_for(
+            &path,
+            target.as_deref().unwrap_or(&app_contract::current_target()),
+        )?;
+        println!("{}", serde_json::to_string_pretty(&selected)?);
+        return Ok(());
+    }
     let root = args
         .root
         .map(Ok)
@@ -155,6 +171,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     m.recover()?;
     let value = match args.command {
+        Command::CheckBuild { .. } => unreachable!(),
         Command::List => serde_json::to_value(m.snapshot()?)?,
         Command::Install { url, config } => {
             let app = m.add(&url, Channel::Main)?;
