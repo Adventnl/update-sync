@@ -9,6 +9,7 @@ pub mod platform;
 pub mod recipes;
 pub mod storage;
 pub mod store;
+mod toolchains;
 #[cfg(windows)]
 mod windows_trust;
 

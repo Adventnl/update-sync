@@ -4,11 +4,11 @@ A small desktop library for your GitHub applications. Built with Rust, Tauri, Re
 
 Paste a GitHub repository URL and click Install. Relay resolves the latest `main` commit, detects the build system from that exact source snapshot, compiles it, and activates the application. Update repeats the same process with the latest commit. No AI, release packages, GitHub Actions workflow, or manual build commands are needed.
 
-Builds run with your account permissions in disposable, managed folders. Install repositories you trust. The relevant compiler or SDK must already be installed. Relay discovers the installed Windows C++ compiler and SDK without requiring a developer terminal.
+Builds run with your account permissions in disposable, managed folders. Install repositories you trust. Relay packages include Node.js and npm. Other compilers and SDKs must already be installed. Relay discovers common user tool locations and the installed Windows C++ compiler and SDK without requiring a developer terminal.
 
 ## Run
 
-Running packaged Relay does not require Node or Rust. Compiling an application requires its toolchain. On Windows, the locally built installer is `target/release/bundle/nsis/Relay_0.1.0_x64-setup.exe`.
+Packaged Relay includes a private Node.js 24/npm distribution for application builds; it does not change your system Node installation or shell settings. Rust and other native build tools are separate prerequisites when an app needs them. macOS packages require 13.5 or later, matching the bundled Node runtime. On Windows, the locally built installer is `target/release/bundle/nsis/Relay_0.1.0_x64-setup.exe`.
 
 For development, install Node.js 24+, the current stable Rust toolchain, and [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/). Windows needs Microsoft C++ Build Tools and WebView2. macOS needs Xcode command line tools.
 
@@ -17,7 +17,7 @@ npm ci
 npm run desktop
 ```
 
-Use `npm run desktop:build` to build platform packages. The packaging workflow builds Windows x64 and macOS arm64/x64 artifacts when manually dispatched. It does not publish a release or change another repository.
+Use `npm run desktop:build` to build platform packages. Its build hook downloads a pinned official Node distribution for the selected target, verifies its SHA-256, and bundles Node, npm, npx, and licenses. The packaging workflow builds Windows x64 and macOS arm64/x64 artifacts when manually dispatched. It does not publish a release or change another repository.
 
 ## Source builds
 
@@ -38,7 +38,7 @@ Repositories without an app contract retain these automatic recipes:
 | Go | Native binary with read-only module resolution |
 | .NET | Self-contained publish for the current platform and architecture |
 
-Node projects need a committed npm, pnpm, or Yarn lockfile and the corresponding package manager. Tauri and Electron build CLIs must be project dependencies. Java applications need the Java runtime when opened. .NET macOS projects need an application bundle output path. Build recipes target the current operating system and CPU architecture.
+Node projects need a committed npm, pnpm, or Yarn lockfile. npm is bundled; pnpm and Yarn must be installed separately when selected by the project. Tauri and Electron build CLIs must be project dependencies. Java applications need the Java runtime when opened. .NET macOS projects need an application bundle output path. Build recipes target the current operating system and CPU architecture.
 
 Relay checks root manifests and nested projects up to four folders deep. Framework manifests take precedence over their implementation language. Ambiguous layouts open a configuration form. Choose the build system, project folder, and any target, output folder, launch file, or resources once. Relay saves those choices for future updates. A chosen launch file is reused when it exists in the next build. See [source build configuration](docs/source-builds.md) for recipe details and optional repository-owned configuration.
 

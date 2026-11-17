@@ -578,7 +578,6 @@ impl Manager {
                 .env("RELAY_ARCH", std::env::consts::ARCH);
         }
         for name in [
-            "PATH",
             "SystemRoot",
             "WINDIR",
             "USERPROFILE",
@@ -618,6 +617,20 @@ impl Manager {
         if let Some(tool) = cc::windows_registry::find_tool(std::env::consts::ARCH, "cl.exe") {
             cmd.envs(tool.get_envs());
         }
+        // Include packaged Node/npm and installed user tools even with Finder's
+        // minimal PATH. Preserve any compiler paths supplied by Visual Studio.
+        let path = crate::toolchains::build_path(&self.launcher)?;
+        #[cfg(windows)]
+        let path = if let Some((_, Some(compiler_path))) =
+            cmd.get_envs().find(|(name, _)| *name == "PATH")
+        {
+            std::env::join_paths(
+                std::env::split_paths(&path).chain(std::env::split_paths(compiler_path)),
+            )?
+        } else {
+            path
+        };
+        cmd.env("PATH", &path);
         cmd.env("CARGO_HOME", environment.join("cargo"))
             .env("CARGO_TARGET_DIR", environment.join("target"))
             .env("CARGO_INCREMENTAL", "0")
@@ -640,7 +653,7 @@ impl Manager {
             .env("XDG_CACHE_HOME", environment.join("cache"))
             .env("CCACHE_DIR", environment.join("ccache"))
             .env("SCCACHE_DIR", environment.join("sccache"))
-            .env("CI", "1")
+            .env("CI", "true")
             .args(args)
             .current_dir(project);
         let scratch = environment.join("tmp");
@@ -660,6 +673,8 @@ impl Manager {
         let mut child = cmd.spawn().with_context(|| {
             if program.contains(['/', '\\']) {
                 format!("The repository build program {program} could not start. Check the declared build steps, then retry.")
+            } else if matches!(program, "node" | "npm" | "npx") {
+                format!("{program} could not start. Reinstall Relay to restore Node.js and npm, then retry.")
             } else {
                 format!("{program} is not available. Install the {program} toolchain, then retry Install.")
             }
@@ -1092,6 +1107,60 @@ fn choose_entries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn build_steps_and_their_children_use_packaged_node_tools() {
+        use std::{os::unix::fs::PermissionsExt, sync::Arc};
+        let work = tempfile::tempdir().unwrap();
+        let parent = if cfg!(target_os = "macos") {
+            work.path().join("Relay.app/Contents/MacOS")
+        } else {
+            work.path().join("Relay")
+        };
+        fs::create_dir_all(&parent).unwrap();
+        let resources = if cfg!(target_os = "macos") {
+            parent.parent().unwrap().join("Resources")
+        } else {
+            parent.clone()
+        };
+        let bin = resources.join("toolchains/node/bin");
+        fs::create_dir_all(&bin).unwrap();
+        for (name, source) in [
+            ("npm", "#!/bin/sh\nexec node\n"),
+            (
+                "node",
+                "#!/bin/sh\n[ \"$CI\" = true ] || exit 1\nprintf bundled > \"$RELAY_OUTPUT_DIR/result\"\n",
+            ),
+        ] {
+            fs::write(bin.join(name), source).unwrap();
+            fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let manager = Manager::new(
+            work.path().join("library"),
+            parent.join("relay"),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        let environment = work.path().join("environment");
+        let output = work.path().join("output");
+        fs::create_dir(&environment).unwrap();
+        fs::create_dir(&output).unwrap();
+        manager
+            .run_build(
+                "gh-1",
+                work.path(),
+                &environment,
+                "npm",
+                &["ci"],
+                Some(&output),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(output.join("result")).unwrap(),
+            "bundled"
+        );
+    }
     #[test]
     fn build_plans_do_not_gate_unfamiliar_languages() {
         assert_eq!(

@@ -59,7 +59,15 @@ Go uses `go build -mod=readonly -trimpath`, targeting the module root or configu
 
 ## Toolchains and recovery
 
-The required SDKs, compilers, Node package manager, and system development libraries must be installed. Relay does not silently install global toolchains. Missing tools produce an error with a retry action. Build systems outside the legacy recipes can use an app contract. Repositories requiring submodules need self-contained source snapshots.
+Packaged Relay includes Node.js 24, npm, and npx, with the official distribution's licenses. The packaging hook verifies pinned archive hashes before including the matching Windows/macOS CPU distribution. The Windows portable ZIP includes this toolchain alongside the executable, just as the installer does. Node 24 requires macOS 13.5 or later.
+
+Builds search the packaged Node directory first, then absolute inherited PATH entries, configured SDK locations, common user tool directories (including Cargo and Volta), and standard system/Homebrew locations. This also applies to child build scripts, so opening Relay from Finder does not hide an installed npm or Cargo. Relay does not source shell startup files or modify the user's environment. Development and CLI builds without packaged resources use installed tools.
+
+The runner sets `CI=true`. Tauri's CLI parses this as a boolean and rejects `CI=1`, including when invoked indirectly through an npm packaging script. Regression coverage checks this value along with packaged tool selection and child-process lookup.
+
+Rust, Xcode command line tools, Windows C++ Build Tools, other SDKs, pnpm/Yarn, and system development libraries remain host prerequisites. For example, Athenaeum's app contract uses npm for its JavaScript packages and Cargo for its native app. Relay does not silently install global toolchains. Missing tools produce an error with a retry action. Build systems outside the legacy recipes can use an app contract. Repositories requiring submodules need self-contained source snapshots.
+
+Verified on macOS arm64 on 2026-11-17: all 37 Rust tests, Clippy with warnings denied, frontend checks (15 tests), and the macOS app package passed. Packaged npm/npx and an `npm ci` lifecycle script ran with a minimal desktop PATH. A live install of `Hanoryx-North/athenaeum` at `780f1ae84a2da60b9a428c7ec649c0dcf1e148f8` compiled, passed integrity checks, activated, and removed its temporary workspace. Windows and Intel macOS packages were not executed locally.
 
 Build commands run under the user account with network access. Managed workspaces limit clutter and prevent writes through configured paths outside those folders. They are not a security sandbox for repository code.
 

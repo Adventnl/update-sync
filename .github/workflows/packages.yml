@@ -48,13 +48,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force packages | Out-Null
-          Compress-Archive -LiteralPath target/${{ matrix.target }}/release/relay.exe -DestinationPath packages/Relay-${{ matrix.name }}.zip
+          $release = 'target/${{ matrix.target }}/release'
+          if (!(Test-Path "$release/toolchains/node/node.exe") -or !(Test-Path "$release/toolchains/node/node_modules/npm/bin/npm-cli.js")) { throw 'Bundled Node/npm is missing' }
+          Compress-Archive -LiteralPath "$release/relay.exe", "$release/toolchains" -DestinationPath packages/Relay-${{ matrix.name }}.zip
           Copy-Item -Path target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe -Destination packages
           Get-ChildItem packages -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content packages/SHA256SUMS
       - name: Make macOS ZIP
         if: runner.os == 'macOS'
         run: |
           mkdir -p packages
+          test -x target/${{ matrix.target }}/release/bundle/macos/Relay.app/Contents/Resources/toolchains/node/bin/node
+          test -f target/${{ matrix.target }}/release/bundle/macos/Relay.app/Contents/Resources/toolchains/node/lib/node_modules/npm/bin/npm-cli.js
           ditto -c -k --keepParent target/${{ matrix.target }}/release/bundle/macos/Relay.app packages/Relay-${{ matrix.name }}.zip
           shasum -a 256 packages/*.zip > packages/SHA256SUMS
       - uses: actions/upload-artifact@v4

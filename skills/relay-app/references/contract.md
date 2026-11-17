@@ -53,7 +53,7 @@ Relay chooses the exact current OS/CPU pair. It does not cross-compile or fall b
 
 ## Command environment
 
-Relay executes commands with a reduced environment, the user's permissions, and network access. Compilers, SDKs, system development libraries, and any script interpreter must already be installed. The contract cannot silently provision host toolchains. Dependency installation can be an explicit build step, for example `npm ci`; commit and use the package manager's lockfile.
+Relay executes commands with a reduced environment, the user's permissions, and network access. Packaged Relay supplies Node.js 24, npm, and npx. Other compilers, SDKs, system development libraries, and script interpreters must already be installed. The contract cannot silently provision host toolchains. Dependency installation can be an explicit build step, for example `npm ci`; commit and use the package manager's lockfile.
 
 | Variable | Meaning |
 | --- | --- |
@@ -64,7 +64,7 @@ Relay executes commands with a reduced environment, the user's permissions, and 
 | `CARGO_TARGET_DIR` | Private compiler output. Use this instead of assuming a source-local `target` folder. |
 | `CARGO_HOME`, Node/Python/Gradle/Go/.NET cache variables, `TEMP`/`TMP`/`TMPDIR`, `XDG_CACHE_HOME` | Disposable build environment and dependency caches, removed after the build. |
 
-`PATH`, home paths, and selected SDK locations such as `JAVA_HOME`, `DOTNET_ROOT`, `RUSTUP_HOME`, `SDKROOT`, and `DEVELOPER_DIR` are inherited. Arbitrary environment variables and Relay's GitHub token are not forwarded. Configure other language-specific settings in committed scripts or explicit command arguments. There is no shell expansion in `args`; `$RELAY_OUTPUT_DIR` as an argument stays that literal string. Read environment variables inside scripts. On Windows, known package-manager commands are invoked through `cmd.exe` and reject shell metacharacters in arguments; use a committed script for more elaborate logic.
+`PATH` starts with Relay's packaged Node directory, followed by absolute inherited entries and common user/system tool locations. Home paths and selected SDK locations such as `JAVA_HOME`, `DOTNET_ROOT`, `RUSTUP_HOME`, `SDKROOT`, and `DEVELOPER_DIR` are inherited. Arbitrary environment variables and Relay's GitHub token are not forwarded. Configure other language-specific settings in committed scripts or explicit command arguments. There is no shell expansion in `args`; `$RELAY_OUTPUT_DIR` as an argument stays that literal string. Read environment variables inside scripts. On Windows, known package-manager commands are invoked through `cmd.exe` and reject shell metacharacters in arguments; use a committed script for more elaborate logic.
 
 For a manual script check, first remove and recreate only the declared disposable output folder, set the four `RELAY_*` variables above to absolute paths/current host values, and run the declared steps from `project`. Also set a temporary `CARGO_TARGET_DIR` when relevant. This catches packaging scripts that assume a source-local target folder.
 
